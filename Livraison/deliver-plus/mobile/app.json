@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Amder",
+    "slug": "amder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "mr.deliver.app"
+    },
+    "ios": {
+      "bundleIdentifier": "mr.deliver.app"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Amder Client",
+    "slug": "amder-client",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#3B328F"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#3B328F"
+      },
+      "package": "mr.amder.client"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Amder a besoin de votre position pour la livraison."
+        }
+      ]
+    ]
+  }
+}
