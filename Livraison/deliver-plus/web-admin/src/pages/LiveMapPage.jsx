@@ -22,17 +22,23 @@ const STATUS_LABELS = {
 };
 
 export default function LiveMapPage() {
-  const [drivers, setDrivers]       = useState([]);
-  const [orders, setOrders]         = useState([]);
-  const [selected, setSelected]     = useState(null); // livreur sélectionné
-  const [mapReady, setMapReady]     = useState(false);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
-  const mapRef    = useRef(null);
-  const leafletRef = useRef(null);
-  const markersRef = useRef({});
-  const trailsRef  = useRef({});
-  const socketRef  = useRef(null);
-  const navigate   = useNavigate();
+  const [drivers, setDrivers]           = useState([]);
+  const [orders, setOrders]             = useState([]);
+  const [selected, setSelected]         = useState(null);
+  const [mapReady, setMapReady]         = useState(false);
+  const [lastUpdate, setLastUpdate]     = useState(new Date());
+  const [trackedDriverId, setTrackedDriverId] = useState(null);
+  const [notification, setNotification] = useState(null);
+  const [socketStatus, setSocketStatus] = useState('connecting');
+  const [locationCount, setLocationCount] = useState(0);
+  const isAdmin = (localStorage.getItem('role') || 'admin') === 'admin';
+  const mapRef         = useRef(null);
+  const leafletRef     = useRef(null);
+  const markersRef     = useRef({});
+  const trailsRef      = useRef({});
+  const socketRef      = useRef(null);
+  const trackedDriverRef = useRef(null);
+  const navigate       = useNavigate();
 
   // ─── Charger données initiales ──────────────────────────────────────────────
   const loadData = async () => {
@@ -77,13 +83,30 @@ export default function LiveMapPage() {
 
     // Socket.io
     const token = localStorage.getItem('token');
+    const role  = localStorage.getItem('role') || 'admin';
     const socket = io(SOCKET_URL, { auth: { token } });
     socketRef.current = socket;
-    socket.emit('join_admin');
+
+    socket.on('connect', () => {
+      setSocketStatus('connected');
+      socket.emit(role === 'agent' ? 'join_agent' : 'join_admin');
+    });
+    socket.on('disconnect', () => setSocketStatus('disconnected'));
+    socket.on('connect_error', () => setSocketStatus('error'));
+
+    // Émettre immédiatement si déjà connecté
+    if (socket.connected) {
+      socket.emit(role === 'agent' ? 'join_agent' : 'join_admin');
+    }
 
     socket.on('driver_location', ({ driverId, lat, lng }) => {
-      updateDriverMarker(driverId, lat, lng);
+      updateDriverMarker(driverId.toString(), lat, lng);
       setLastUpdate(new Date());
+      setLocationCount(c => c + 1);
+      // Suivre automatiquement le chauffeur sélectionné
+      if (trackedDriverRef.current && trackedDriverRef.current === driverId.toString() && mapRef.current) {
+        mapRef.current.panTo([lat, lng], { animate: true });
+      }
     });
 
     socket.on('driver_status_update', ({ driverId, status }) => {
@@ -91,7 +114,19 @@ export default function LiveMapPage() {
       setLastUpdate(new Date());
     });
 
-    socket.on('order_accepted', () => loadData());
+    socket.on('order_accepted', ({ driverId, driverName, startLocation }) => {
+      loadData();
+      const dId = driverId.toString();
+      // Activer le suivi immédiatement, même sans coordonnées de départ
+      trackedDriverRef.current = dId;
+      setTrackedDriverId(dId);
+      setNotification(`🛵 ${driverName} a accepté une commande — suivi activé`);
+      setTimeout(() => setNotification(null), 8000);
+      // Centrer la carte si on a une position de départ valide
+      if (startLocation?.lat && startLocation?.lng && mapRef.current) {
+        mapRef.current.setView([startLocation.lat, startLocation.lng], 16, { animate: true });
+      }
+    });
     socket.on('order_status_update', () => loadData());
 
     const interval = setInterval(loadData, 20000);
@@ -152,9 +187,10 @@ export default function LiveMapPage() {
           <p style="font-size:12px;margin-bottom:4px;">Livraisons : ${d.stats?.totalDeliveries || 0}</p>
           ${currentOrder ? `<p style="font-size:12px;color:#534AB7;margin-bottom:8px;">📦 Commande en cours</p>` : ''}
           <div style="display:flex;gap:6px;margin-top:8px;">
-            ${d.status !== 'actif' ? `<button onclick="window.adminAction('${d._id}','actif')" style="flex:1;padding:5px;background:#3B6D11;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;">✅ Activer</button>` : ''}
-            ${d.status !== 'suspendu' ? `<button onclick="window.adminAction('${d._id}','suspendu')" style="flex:1;padding:5px;background:#A32D2D;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;">🚫 Suspendre</button>` : ''}
-            ${currentOrder ? `<button onclick="window.trackOrder('${currentOrder._id}')" style="flex:1;padding:5px;background:#534AB7;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;">📍 Suivre</button>` : ''}
+            ${isAdmin && d.status !== 'actif' ? `<button onclick="window.adminAction('${d._id}','actif')" style="flex:1;padding:5px;background:#3B6D11;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;">✅ Activer</button>` : ''}
+            ${isAdmin && d.status !== 'suspendu' ? `<button onclick="window.adminAction('${d._id}','suspendu')" style="flex:1;padding:5px;background:#A32D2D;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;">🚫 Suspendre</button>` : ''}
+            ${currentOrder ? `<button onclick="window.trackOrder('${currentOrder._id}')" style="flex:1;padding:5px;background:#534AB7;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;">📍 Commande</button>` : ''}
+            <button onclick="window.toggleTrackDriver('${d._id}')" style="flex:1;padding:5px;background:#27500A;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;">📡 Suivre en direct</button>
           </div>
         </div>
       `;
@@ -179,6 +215,13 @@ export default function LiveMapPage() {
 
     if (markersRef.current[driverId]) {
       markersRef.current[driverId].setLatLng([lat, lng]);
+    } else {
+      // Créer un marqueur minimal si le chauffeur n'en a pas encore
+      const icon = L.divIcon({
+        html: `<div style="width:38px;height:38px;background:#534AB7;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:17px;box-shadow:0 2px 8px rgba(0,0,0,0.35);">🛵</div>`,
+        iconSize: [38, 38], iconAnchor: [19, 19], className: '',
+      });
+      markersRef.current[driverId] = L.marker([lat, lng], { icon }).addTo(mapRef.current);
     }
 
     // Tracer le trajet
@@ -199,7 +242,7 @@ export default function LiveMapPage() {
 
     // Mettre à jour la position dans le state
     setDrivers(prev => prev.map(d =>
-      d._id === driverId
+      d._id.toString() === driverId
         ? { ...d, currentLocation: { lat, lng, updatedAt: new Date() } }
         : d
     ));
@@ -217,7 +260,21 @@ export default function LiveMapPage() {
     window.trackOrder = (orderId) => {
       navigate(`/orders/${orderId}/track`);
     };
-    return () => { delete window.adminAction; delete window.trackOrder; };
+    window.toggleTrackDriver = (driverId) => {
+      const dId = driverId.toString();
+      if (trackedDriverRef.current === dId) {
+        trackedDriverRef.current = null;
+        setTrackedDriverId(null);
+        setNotification(null);
+      } else {
+        trackedDriverRef.current = dId;
+        setTrackedDriverId(dId);
+        setNotification('📡 Suivi en direct activé');
+        setTimeout(() => setNotification(null), 4000);
+      }
+      if (mapRef.current) mapRef.current.closePopup();
+    };
+    return () => { delete window.adminAction; delete window.trackOrder; delete window.toggleTrackDriver; };
   }, [navigate]);
 
   // ─── Centrer sur un livreur ────────────────────────────────────────────────
@@ -231,6 +288,22 @@ export default function LiveMapPage() {
     }
   };
 
+  // ─── Activer / désactiver le suivi temps réel d'un chauffeur ───────────────
+  const toggleTracking = (driver) => {
+    const dId = driver._id.toString();
+    if (trackedDriverRef.current === dId) {
+      trackedDriverRef.current = null;
+      setTrackedDriverId(null);
+      setNotification(null);
+    } else {
+      trackedDriverRef.current = dId;
+      setTrackedDriverId(dId);
+      focusDriver(driver);
+      setNotification(`📍 Suivi de ${driver.user?.firstName} ${driver.user?.lastName} activé`);
+      setTimeout(() => setNotification(null), 4000);
+    }
+  };
+
   const activeDrivers    = drivers.filter(d => d.status === 'actif');
   const suspendedDrivers = drivers.filter(d => d.status === 'suspendu');
   const activeOrders     = orders.filter(o => ['accepte','en_preparation','en_route'].includes(o.status));
@@ -240,6 +313,18 @@ export default function LiveMapPage() {
       <div className="page-header">
         <h1>🗺️ Carte en temps réel</h1>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          {/* Indicateur socket */}
+          <div style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:20,
+            background: socketStatus === 'connected' ? '#EAF3DE' : socketStatus === 'error' ? '#FCEBEB' : '#FAEEDA' }}>
+            <div style={{ width:8, height:8, borderRadius:'50%',
+              background: socketStatus === 'connected' ? '#3B6D11' : socketStatus === 'error' ? '#A32D2D' : '#854F0B',
+              animation: socketStatus === 'connected' ? 'pulse 2s infinite' : 'none',
+            }} />
+            <span style={{ fontSize:11, fontWeight:600,
+              color: socketStatus === 'connected' ? '#3B6D11' : socketStatus === 'error' ? '#A32D2D' : '#854F0B' }}>
+              {socketStatus === 'connected' ? `Socket ● ${locationCount} GPS` : socketStatus === 'error' ? 'Socket ✕ Erreur' : 'Socket…'}
+            </span>
+          </div>
           <span style={{ fontSize:12, color:'#6b6b67' }}>
             Mis à jour : {lastUpdate.toLocaleTimeString('fr-FR')}
           </span>
@@ -266,6 +351,24 @@ export default function LiveMapPage() {
           <p className="mvalue" style={{ color:'#A32D2D' }}>{suspendedDrivers.length}</p>
         </div>
       </div>
+
+      {/* Notification suivi */}
+      {notification && (
+        <div style={{
+          background:'#534AB7', color:'#fff', borderRadius:10, padding:'10px 16px',
+          marginBottom:12, fontSize:13, fontWeight:500,
+          display:'flex', justifyContent:'space-between', alignItems:'center',
+          boxShadow:'0 2px 8px rgba(83,74,183,0.3)',
+        }}>
+          <span>{notification}</span>
+          {trackedDriverId && (
+            <button onClick={() => { trackedDriverRef.current = null; setTrackedDriverId(null); setNotification(null); }}
+              style={{ background:'rgba(255,255,255,0.2)', border:'none', color:'#fff', borderRadius:6, padding:'3px 10px', cursor:'pointer', fontSize:12 }}>
+              ✕ Arrêter le suivi
+            </button>
+          )}
+        </div>
+      )}
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 280px', gap:16 }}>
         {/* Carte */}
@@ -312,11 +415,22 @@ export default function LiveMapPage() {
                       </p>
                       <p style={{ fontSize:11, color:'#6b6b67' }}>{d.zone} · {(d.solde||0).toLocaleString()} MRU</p>
                     </div>
-                    <div style={{ textAlign:'right' }}>
+                    <div style={{ textAlign:'right', display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
                       <span style={{ fontSize:10, color, fontWeight:500 }}>
                         {d.status === 'actif' ? '●' : d.status === 'suspendu' ? '✕' : '○'}
                       </span>
-                      {hasOrder && <p style={{ fontSize:10, color:'#534AB7' }}>📦</p>}
+                      {hasOrder && (
+                        <button
+                          onClick={e => { e.stopPropagation(); toggleTracking(d); }}
+                          style={{
+                            fontSize:10, padding:'2px 7px', borderRadius:5, border:'none', cursor:'pointer',
+                            background: trackedDriverId === d._id.toString() ? '#534AB7' : '#EEEDFE',
+                            color:      trackedDriverId === d._id.toString() ? '#fff'    : '#534AB7',
+                            fontWeight:600,
+                          }}>
+                          {trackedDriverId === d._id.toString() ? '📡 Suivi' : '👁 Suivre'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -348,8 +462,8 @@ export default function LiveMapPage() {
             </div>
           )}
 
-          {/* Actions rapides suspendus */}
-          {suspendedDrivers.length > 0 && (
+          {/* Actions rapides suspendus — admin uniquement */}
+          {suspendedDrivers.length > 0 && isAdmin && (
             <div className="card" style={{ borderLeft:'3px solid #A32D2D' }}>
               <p style={{ fontSize:13, fontWeight:500, color:'#A32D2D', marginBottom:10 }}>
                 🚫 Comptes suspendus ({suspendedDrivers.length})

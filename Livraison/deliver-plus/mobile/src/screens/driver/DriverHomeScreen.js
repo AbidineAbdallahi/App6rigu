@@ -1,14 +1,40 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert, Modal, ActivityIndicator, Animated } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { Audio } from 'expo-av';
 import { io } from 'socket.io-client';
+import { Audio } from 'expo-av';
 import api from '../../services/api';
 import useAuthStore from '../../stores/authStore';
+import useOrderStore from '../../stores/orderStore';
 import { COLORS, SOCKET_URL, SERVICE_ICONS, STATUS_LABELS } from '../../constants';
 
-const ORDER_TIMEOUT_MS = 20000; // 20 secondes
+const ORDER_TIMEOUT_MS = 20000;
+
+function fmtAddr(addr) {
+  const raw = addr?.label || addr?.zone || addr?.street || '—';
+  const m = raw.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
+  if (m) return `${parseFloat(m[1]).toFixed(3)}, ${parseFloat(m[2]).toFixed(3)}`;
+  return raw;
+}
+
+function GeoLabel({ addr, style, numberOfLines }) {
+  const raw = addr?.label || addr?.zone || addr?.street || '—';
+  const m   = raw.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
+  const fallback = m ? `${parseFloat(m[1]).toFixed(3)}, ${parseFloat(m[2]).toFixed(3)}` : raw;
+  const [label, setLabel] = useState(fallback);
+  useEffect(() => {
+    if (!m) return;
+    Location.reverseGeocodeAsync({ latitude: parseFloat(m[1]), longitude: parseFloat(m[2]) })
+      .then(r => {
+        if (!r?.length) return;
+        const parts = [r[0].name, r[0].street, r[0].district, r[0].subregion, r[0].city].filter(Boolean);
+        if (parts.length) setLabel(parts.slice(0, 3).join(', '));
+      })
+      .catch(() => {});
+  }, [raw]);
+  return <Text style={style} numberOfLines={numberOfLines}>{label}</Text>;
+}
 
 // ─── Anneau de compte à rebours ───────────────────────────────────────────────
 const RING_SIZE   = 56;
@@ -61,6 +87,8 @@ function CountdownRing({ timeLeft, total = 20 }) {
 
 export default function DriverHomeScreen() {
   const { user, driverProfile } = useAuthStore();
+  const { setCurrentOrder: syncOrder, clearCurrentOrder } = useOrderStore();
+  const insets = useSafeAreaInsets();
   const [driver, setDriver]         = useState(null);
   const [isOnline, setIsOnline]     = useState(false);
   const [currentOrder, setCurrentOrder] = useState(null);
@@ -69,14 +97,18 @@ export default function DriverHomeScreen() {
   const [todayStats, setTodayStats] = useState({ deliveries:0, earnings:0 });
   const [now, setNow]               = useState(Date.now());
   const [loading, setLoading]       = useState(true);
-  const [soldeModal, setSoldeModal] = useState(null);     // commande avec solde insuffisant
-  const socketRef   = useRef(null);
-  const locationRef = useRef(null);
-  const driverIdRef = useRef(null);
+  const [soldeModal, setSoldeModal] = useState(null);
+  const [orderAlert, setOrderAlert] = useState(null); // { order, distance, canAccept, timeLeft }
+  const socketRef      = useRef(null);
+  const locationRef    = useRef(null);
+  const driverIdRef    = useRef(null);
+  const alertTimerRef  = useRef(null);
+  const alertCountRef  = useRef(null);
+  const currentOrderRef = useRef(null);
+
   const soundRef      = useRef(null);
   const soundTimerRef = useRef(null);
 
-  // ─── Sonnerie bip moderne ─────────────────────────────────────────────────
   const stopBipSound = async () => {
     if (soundTimerRef.current) { clearInterval(soundTimerRef.current); soundTimerRef.current = null; }
     if (soundRef.current) {
@@ -89,17 +121,16 @@ export default function DriverHomeScreen() {
     await stopBipSound();
     const playOnce = async () => {
       try {
-        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, shouldDuckAndroid: false, staysActiveInBackground: false });
+        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, shouldDuckAndroid: false });
         const { sound } = await Audio.Sound.createAsync(
-          require('../../assets/alert.wav'),
-          { shouldPlay: true, isLooping: false, volume: 1.0 }
+          require('../../../assets/alert.wav'),
+          { shouldPlay: true, volume: 1.0 }
         );
         soundRef.current = sound;
-        setTimeout(async () => {
-          try { await sound.stopAsync(); await sound.unloadAsync(); } catch {}
-          if (soundRef.current === sound) soundRef.current = null;
-        }, 400);
-      } catch (e) { console.error('[SON]:', e.message); }
+        sound.setOnPlaybackStatusUpdate(status => {
+          if (status.didJustFinish) { sound.unloadAsync(); }
+        });
+      } catch (e) { console.warn('[SON]:', e.message); }
     };
     playOnce();
     soundTimerRef.current = setInterval(playOnce, 1800);
@@ -128,7 +159,7 @@ export default function DriverHomeScreen() {
       setDriver(data.driver);
       setSolde(data.driver.solde || 0);
       setIsOnline(data.driver.status === 'actif');
-      if (data.driver.currentOrder) setCurrentOrder(data.driver.currentOrder);
+      if (data.driver.currentOrder) { setCurrentOrder(data.driver.currentOrder); syncOrder(data.driver.currentOrder); }
       driverIdRef.current = data.driver._id;
       // Si la socket est déjà connectée, rejoindre la room maintenant
       if (socketRef.current?.connected) {
@@ -170,27 +201,31 @@ export default function DriverHomeScreen() {
 
     // Nouvelle commande disponible à proximité
     socket.on('new_order_nearby', ({ order, distance, minSoldeRequired, driverSolde, canAccept }) => {
+      if (currentOrderRef.current) return; // déjà une commande en cours
       setNearbyOrders(prev => {
         if (prev.find(o => o._id === order._id)) return prev;
         return [{ ...order, distance, minSoldeRequired, canAccept, receivedAt: Date.now() }, ...prev];
       });
       playBipSound();
-      if (canAccept) {
-        Alert.alert(
-          `🚨 Nouvelle commande !`,
-          `${SERVICE_ICONS[order.serviceType]} à ${distance} km\nTotal : ${order.pricing?.total} MRU\nVotre solde : ${driverSolde} MRU`,
-          [
-            { text: 'Refuser', style:'cancel', onPress: () => rejectOrder(order._id) },
-            { text: '✅ Accepter', onPress: () => acceptOrder(order) },
-          ]
-        );
-      } else {
-        Alert.alert(
-          '⚠️ Commande disponible — Solde insuffisant',
-          `Commande à ${distance} km\nSolde requis : ${minSoldeRequired} MRU\nVotre solde : ${driverSolde} MRU\n\nVous ne pouvez pas accepter cette commande.`,
-          [{ text: 'OK' }]
-        );
-      }
+      // Overlay custom avec compte à rebours auto-dismiss
+      if (alertTimerRef.current) { clearTimeout(alertTimerRef.current); clearInterval(alertCountRef.current); }
+      setOrderAlert({ order, distance, canAccept, timeLeft: 20 });
+      alertCountRef.current = setInterval(() => {
+        setOrderAlert(prev => {
+          if (!prev) return null;
+          if (prev.timeLeft <= 1) {
+            clearInterval(alertCountRef.current);
+            clearTimeout(alertTimerRef.current);
+            stopBipSound();
+            return null;
+          }
+          return { ...prev, timeLeft: prev.timeLeft - 1 };
+        });
+      }, 1000);
+      alertTimerRef.current = setTimeout(() => {
+        setOrderAlert(null);
+        stopBipSound();
+      }, 20000);
     });
 
     // Commande prise par un autre livreur
@@ -200,6 +235,17 @@ export default function DriverHomeScreen() {
         if (next.length === 0) stopBipSound();
         return next;
       });
+      setOrderAlert(prev => {
+        if (!prev) return null;
+        const same = prev.order._id === orderId || prev.order._id?.toString() === orderId?.toString();
+        if (same) {
+          clearInterval(alertCountRef.current);
+          clearTimeout(alertTimerRef.current);
+          stopBipSound();
+          return null;
+        }
+        return prev;
+      });
     });
 
     // Commande expirée (personne n'a accepté en 20s)
@@ -208,6 +254,17 @@ export default function DriverHomeScreen() {
         const next = prev.filter(o => o._id !== orderId);
         if (next.length === 0) stopBipSound();
         return next;
+      });
+      setOrderAlert(prev => {
+        if (!prev) return null;
+        const same = prev.order._id === orderId || prev.order._id?.toString() === orderId?.toString();
+        if (same) {
+          clearInterval(alertCountRef.current);
+          clearTimeout(alertTimerRef.current);
+          stopBipSound();
+          return null;
+        }
+        return prev;
       });
     });
 
@@ -221,11 +278,21 @@ export default function DriverHomeScreen() {
   }, [driverProfile]);
 
   // ─── Accepter une commande ─────────────────────────────────────────────────
-  const acceptOrder = async (order) => {
+  const dismissAlert = () => {
+    clearInterval(alertCountRef.current);
+    clearTimeout(alertTimerRef.current);
+    setOrderAlert(null);
     stopBipSound();
+  };
+
+  const acceptOrder = async (order) => {
+    dismissAlert();
+    currentOrderRef.current = order;
     try {
       const { data } = await api.post(`/orders/${order._id}/accept`);
+      currentOrderRef.current = data.order;
       setCurrentOrder(data.order);
+      syncOrder(data.order);
       setNearbyOrders([]);
       startLocationTracking(data.order._id);
       Alert.alert('✅ Commande acceptée !', `Rendez-vous au point de retrait.\nCommission finale : ${data.order.pricing?.commission} MRU sera prélevée à la livraison.`);
@@ -241,6 +308,7 @@ export default function DriverHomeScreen() {
 
   // ─── Refuser une commande ──────────────────────────────────────────────────
   const rejectOrder = async (orderId) => {
+    dismissAlert();
     try {
       await api.post(`/orders/${orderId}/reject`);
       setNearbyOrders(prev => {
@@ -257,9 +325,12 @@ export default function DriverHomeScreen() {
     try {
       await api.patch(`/orders/${currentOrder._id}/status`, { status });
       setCurrentOrder(prev => ({ ...prev, status }));
+      syncOrder({ ...currentOrder, status });
       if (status === 'livre') {
         stopLocation();
+        currentOrderRef.current = null;
         setCurrentOrder(null);
+        clearCurrentOrder();
         setTodayStats(p => ({
           deliveries: p.deliveries + 1,
           earnings: p.earnings + (currentOrder.pricing?.driverEarning || 0),
@@ -273,12 +344,21 @@ export default function DriverHomeScreen() {
   const startLocationTracking = async (orderId) => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return;
+    // Arrêter l'ancien watcher avant d'en démarrer un nouveau
+    stopLocation();
+    const dId = driverIdRef.current || driverProfile?._id;
+    // Envoyer la position immédiatement
+    try {
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      socketRef.current?.emit('update_location', {
+        driverId: dId, lat: pos.coords.latitude, lng: pos.coords.longitude, orderId,
+      });
+    } catch {}
     locationRef.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 4000, distanceInterval: 10 },
+      { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
       ({ coords }) => {
-        const dId = driverIdRef.current || driverProfile?._id;
         socketRef.current?.emit('update_location', {
-          driverId: dId,
+          driverId: driverIdRef.current || driverProfile?._id,
           lat: coords.latitude,
           lng: coords.longitude,
           orderId,
@@ -290,11 +370,22 @@ export default function DriverHomeScreen() {
   const startLocation = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Permission refusée'); return; }
+    const dId = driverIdRef.current || driverProfile?._id;
+    // Envoyer la position immédiatement dès que le chauffeur passe en ligne
+    try {
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      socketRef.current?.emit('update_location', {
+        driverId: dId, lat: pos.coords.latitude, lng: pos.coords.longitude,
+      });
+    } catch {}
     locationRef.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 15 },
+      { accuracy: Location.Accuracy.High, timeInterval: 4000, distanceInterval: 8 },
       ({ coords }) => {
-        const dId = driverIdRef.current || driverProfile?._id;
-        socketRef.current?.emit('update_location', { driverId: dId, lat: coords.latitude, lng: coords.longitude });
+        socketRef.current?.emit('update_location', {
+          driverId: driverIdRef.current || driverProfile?._id,
+          lat: coords.latitude,
+          lng: coords.longitude,
+        });
       }
     );
   };
@@ -324,8 +415,10 @@ export default function DriverHomeScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: orderAlert ? 200 : 24 }]}
+      >
 
         {/* Header + Solde */}
         <View style={styles.header}>
@@ -382,9 +475,9 @@ export default function DriverHomeScreen() {
 
             <View style={styles.addressBlock}>
               <Text style={styles.addressLabel}>📍 Retrait</Text>
-              <Text style={styles.addressText}>{currentOrder.pickupAddress?.label || currentOrder.pickupAddress?.zone || '—'}</Text>
+              <GeoLabel addr={currentOrder.pickupAddress} style={styles.addressText} numberOfLines={2} />
               <Text style={[styles.addressLabel, { marginTop:8 }]}>🏠 Livraison</Text>
-              <Text style={styles.addressText}>{currentOrder.deliveryAddress?.label || currentOrder.deliveryAddress?.zone || '—'}</Text>
+              <GeoLabel addr={currentOrder.deliveryAddress} style={styles.addressText} numberOfLines={2} />
             </View>
 
             <View style={styles.commissionInfo}>
@@ -420,7 +513,7 @@ export default function DriverHomeScreen() {
             {nearbyOrders.length > 0 ? (
               <View>
                 <Text style={styles.sectionTitle}>🔔 Commandes disponibles ({nearbyOrders.length})</Text>
-                {nearbyOrders.map(order => {
+                {nearbyOrders.filter(o => !orderAlert || o._id !== orderAlert.order._id).map(order => {
                   const timeLeft = Math.max(0, Math.ceil((ORDER_TIMEOUT_MS - (now - (order.receivedAt || now))) / 1000));
                   const urgent   = timeLeft <= 5;
                   return (
@@ -429,7 +522,11 @@ export default function DriverHomeScreen() {
                       <Text style={{ fontSize:20 }}>{SERVICE_ICONS[order.serviceType]}</Text>
                       <View style={{ flex:1, marginLeft:10 }}>
                         <Text style={styles.orderTitle}>#{order._id.slice(-6).toUpperCase()} · {order.distance} km</Text>
-                        <Text style={styles.orderSub}>{order.pickupAddress?.zone} → {order.deliveryAddress?.zone}</Text>
+                        <View style={{ flexDirection:'row', flexWrap:'wrap', alignItems:'center', gap:2, marginTop:2 }}>
+                          <GeoLabel addr={order.pickupAddress} style={styles.orderSub} numberOfLines={1} />
+                          <Text style={styles.orderSub}> → </Text>
+                          <GeoLabel addr={order.deliveryAddress} style={styles.orderSub} numberOfLines={1} />
+                        </View>
                       </View>
                       <View style={{ alignItems:'center' }}>
                         <Text style={[styles.orderTotal, { marginBottom:4 }]}>{order.pricing?.total?.toLocaleString()} MRU</Text>
@@ -476,6 +573,44 @@ export default function DriverHomeScreen() {
         )}
       </ScrollView>
 
+      {/* ── Overlay nouvelle commande (auto-dismiss 20s) ── */}
+      {!!orderAlert && (
+        <View style={[styles.alertOverlay, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <View style={styles.alertCard}>
+            <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+              <Text style={styles.alertTitle}>🚨 Nouvelle commande !</Text>
+              <View style={[styles.countdown, { borderColor: orderAlert.timeLeft <= 5 ? COLORS.red : COLORS.green }]}>
+                <Text style={[styles.countdownNum, { color: orderAlert.timeLeft <= 5 ? COLORS.red : COLORS.green }]}>{orderAlert.timeLeft}</Text>
+                <Text style={{ fontSize:8, color: COLORS.muted }}>sec</Text>
+              </View>
+            </View>
+            <Text style={styles.alertInfo}>
+              {SERVICE_ICONS[orderAlert.order.serviceType]}  {orderAlert.distance} km  ·  {orderAlert.order.pricing?.total?.toLocaleString()} MRU
+            </Text>
+            <View style={{ flexDirection:'row', flexWrap:'wrap', alignItems:'center', gap:2, marginTop:4 }}>
+              <GeoLabel addr={orderAlert.order.pickupAddress} style={styles.alertAddr} numberOfLines={1} />
+              <Text style={styles.alertAddr}> → </Text>
+              <GeoLabel addr={orderAlert.order.deliveryAddress} style={styles.alertAddr} numberOfLines={1} />
+            </View>
+            {!orderAlert.canAccept && (
+              <Text style={{ fontSize:12, color: COLORS.red, marginTop:4 }}>Solde insuffisant pour accepter</Text>
+            )}
+            <View style={{ flexDirection:'row', gap:8, marginTop:14 }}>
+              <TouchableOpacity style={styles.alertReject} onPress={() => rejectOrder(orderAlert.order._id)}>
+                <Text style={{ color: COLORS.red, fontWeight:'700' }}>✕ Refuser</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.alertAccept, !orderAlert.canAccept && { opacity:0.4 }]}
+                disabled={!orderAlert.canAccept}
+                onPress={() => orderAlert.canAccept ? acceptOrder(orderAlert.order) : null}
+              >
+                <Text style={{ color:'#fff', fontWeight:'700' }}>✓ Accepter</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Modal solde insuffisant */}
       <Modal visible={!!soldeModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -504,7 +639,7 @@ export default function DriverHomeScreen() {
 
 const styles = StyleSheet.create({
   safe:          { flex:1, backgroundColor: COLORS.bg },
-  scroll:        { padding:20 },
+  scroll:        { padding:20, paddingTop:16 },
   loadingCenter: { flex:1, alignItems:'center', justifyContent:'center' },
   header:        { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:20 },
   greeting:      { fontSize:20, fontWeight:'600', color: COLORS.text },
@@ -537,6 +672,15 @@ const styles = StyleSheet.create({
   acceptBtn:     { flex:2, backgroundColor: COLORS.green, borderRadius:10, padding:12, alignItems:'center' },
   rejectBtn:     { flex:1, backgroundColor: COLORS.redLight, borderRadius:10, padding:12, alignItems:'center' },
   emptyOrder:    { backgroundColor:'#fff', borderRadius:14, padding:32, alignItems:'center', borderWidth:.5, borderColor: COLORS.border },
+  alertOverlay:  { position:'absolute', bottom:0, left:0, right:0, padding:16, paddingBottom:32 },
+  alertCard:     { backgroundColor:'#fff', borderRadius:18, padding:18, shadowColor:'#000', shadowOpacity:0.25, shadowRadius:12, elevation:10, borderWidth:1.5, borderColor: COLORS.purple },
+  alertTitle:    { fontSize:16, fontWeight:'700', color: COLORS.text },
+  alertInfo:     { fontSize:15, fontWeight:'600', color: COLORS.purple, marginTop:4 },
+  alertAddr:     { fontSize:13, color: COLORS.muted, marginTop:4 },
+  alertReject:   { flex:1, backgroundColor: COLORS.redLight, borderRadius:10, padding:13, alignItems:'center' },
+  alertAccept:   { flex:2, backgroundColor: COLORS.green, borderRadius:10, padding:13, alignItems:'center' },
+  countdown:     { width:46, height:46, borderRadius:23, borderWidth:3, alignItems:'center', justifyContent:'center' },
+  countdownNum:  { fontSize:16, fontWeight:'800', lineHeight:18 },
   modalOverlay:  { flex:1, backgroundColor:'rgba(0,0,0,0.5)', alignItems:'center', justifyContent:'center', padding:24 },
   modalCard:     { backgroundColor:'#fff', borderRadius:16, padding:24, width:'100%' },
   modalTitle:    { fontSize:18, fontWeight:'600', color: COLORS.text, marginBottom:12 },

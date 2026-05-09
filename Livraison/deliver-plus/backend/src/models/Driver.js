@@ -31,6 +31,17 @@ const driverSchema = new mongoose.Schema({
     ratingCount:     { type: Number, default: 0 },
   },
   currentOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
+  documents: {
+    photoPersonnelle: { type: String, default: null },
+    photoVehicule:    { type: String, default: null },
+    carteGrise:       { type: String, default: null },
+    carteIdentite:    { type: String, default: null },
+    assurance:        { type: String, default: null },
+  },
+  approvalStatus:   { type: String, enum: ['en_attente','approuve','rejete','incomplet'], default: 'approuve' },
+  rejectionReason:  { type: String, default: null },
+  missingDocuments: { type: [String], default: [] }, // liste des clés manquantes signalées par l'admin
+  missingInfoNote:  { type: String, default: null },  // message libre de l'admin
 }, { timestamps: true });
 
 module.exports = mongoose.model('Driver', driverSchema);

@@ -6,6 +6,26 @@ const STATUS_MAP = { en_attente:['badge-amber','En attente'], accepte:['badge-pu
   en_preparation:['badge-blue','Préparation'], en_route:['badge-purple','En route'],
   livre:['badge-green','Livré'], annule:['badge-red','Annulé'] };
 
+function CallWAButtons({ phone, label }) {
+  if (!phone) return <span style={{ color:'#6b6b67', fontSize:11 }}>—</span>;
+  const clean = phone.replace(/\D/g, '');
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+      <p style={{ fontSize:11, color:'#6b6b67', marginBottom:2 }}>{phone}</p>
+      <div style={{ display:'flex', gap:4 }}>
+        <a href={`tel:${phone}`}
+          style={{ fontSize:10, padding:'2px 6px', borderRadius:4, background:'#E6F1FB', color:'#185FA5', textDecoration:'none', fontWeight:500 }}>
+          📞 {label}
+        </a>
+        <a href={`https://wa.me/${clean}`} target="_blank" rel="noreferrer"
+          style={{ fontSize:10, padding:'2px 6px', borderRadius:4, background:'#E8F8EF', color:'#1a7a44', textDecoration:'none', fontWeight:500 }}>
+          WA
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [total, setTotal] = useState(0);
@@ -52,8 +72,18 @@ export default function OrdersPage() {
                   <tr key={o._id}>
                     <td style={{ fontFamily:'monospace', color:'#6b6b67' }}>#{o._id.slice(-6).toUpperCase()}</td>
                     <td>{SERVICE_ICONS[o.serviceType]} {o.serviceType}</td>
-                    <td>{o.client?.firstName} {o.client?.lastName?.[0]}.</td>
-                    <td>{o.driver ? `${o.driver.user?.firstName} ${o.driver.user?.lastName?.[0]}.` : <span style={{color:'#6b6b67'}}>—</span>}</td>
+                    <td>
+                      <p style={{ fontSize:12, fontWeight:500 }}>{o.client?.firstName} {o.client?.lastName}</p>
+                      <CallWAButtons phone={o.client?.phone} label="Client" />
+                    </td>
+                    <td>
+                      {o.driver ? (
+                        <>
+                          <p style={{ fontSize:12 }}>{o.driver.user?.firstName} {o.driver.user?.lastName}</p>
+                          <CallWAButtons phone={o.driver?.user?.phone} label="Chauffeur" />
+                        </>
+                      ) : <span style={{color:'#6b6b67'}}>—</span>}
+                    </td>
                     <td style={{ fontWeight:500 }}>{o.pricing?.total?.toLocaleString()} MRU</td>
                     <td style={{ color:'#6b6b67' }}>{new Date(o.createdAt).toLocaleDateString('fr-FR')}</td>
                     <td><span className={`badge ${cls}`}>{label}</span></td>

@@ -37,7 +37,7 @@ export default function PhoneOtpLoginScreen() {
 
   const handleSendOtp = async () => {
     if (!phone.trim()) return;
-    const result = await sendOtp(phone.trim(), firstName.trim() || 'Client', lastName.trim() || '');
+    const result = await sendOtp(phone.trim(), firstName.trim() || 'Client', lastName.trim() || undefined);
     if (result?.success) {
       if (result.debug_otp) setDebugOtp(result.debug_otp);
       setStep(2);
@@ -57,7 +57,7 @@ export default function PhoneOtpLoginScreen() {
     clearInterval(timerRef.current);
     setOtp('');
     setDebugOtp('');
-    const result = await sendOtp(phone.trim(), firstName.trim() || 'Client', lastName.trim() || '');
+    const result = await sendOtp(phone.trim(), firstName.trim() || 'Client', lastName.trim() || undefined);
     if (result?.success) {
       if (result.debug_otp) setDebugOtp(result.debug_otp);
       setStep(2);

@@ -11,8 +11,10 @@ const useAuthStore = create(set => ({
     set({ loading: true, error: null });
     try {
       const { data } = await api.post('/auth/login', { email, password });
-      if (data.user.role !== 'admin') throw new Error('Accès réservé aux administrateurs');
+      if (!['admin','agent'].includes(data.user.role))
+        throw new Error('Accès non autorisé');
       localStorage.setItem('token', data.token);
+      localStorage.setItem('role', data.user.role);
       set({ user: data.user, token: data.token, loading: false });
       return true;
     } catch (err) {
@@ -21,7 +23,11 @@ const useAuthStore = create(set => ({
     }
   },
 
-  logout: () => { localStorage.removeItem('token'); set({ user: null, token: null }); },
+  logout: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('role');
+    set({ user: null, token: null });
+  },
 
   fetchMe: async () => {
     try { const { data } = await api.get('/auth/me'); set({ user: data.user }); }

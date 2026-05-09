@@ -1,5 +1,6 @@
 const express = require('express');
-const http = require('http');
+const http    = require('http');
+const path    = require('path');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -22,6 +23,7 @@ const io = new Server(server, {
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.set('io', io);
 
 app.use('/api/auth',    authRoutes);

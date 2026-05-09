@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema({
   email:     { type: String, unique: true, sparse: true, lowercase: true },
   phone:     { type: String, required: true, unique: true },
   password:  { type: String, minlength: 6 },
-  role:      { type: String, enum: ['client','driver','admin'], default: 'client' },
+  role:      { type: String, enum: ['client','driver','admin','agent'], default: 'client' },
   isActive:  { type: Boolean, default: true },
   address:   { street: String, city: { type: String, default: 'Nouakchott' }, zone: String },
   otpCode:   { type: String, default: null },

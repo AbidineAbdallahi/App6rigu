@@ -16,7 +16,15 @@ module.exports = function socketHandler(io) {
     // Admin rejoint sa room
     socket.on('join_admin', () => {
       socket.join('admin');
+      socket.join('staff');
       console.log(`👨‍💼 Admin connecté`);
+    });
+
+    // Agent rejoint sa room
+    socket.on('join_agent', () => {
+      socket.join('agent');
+      socket.join('staff');
+      console.log(`🧑‍💼 Agent connecté`);
     });
 
     // Livreur s'identifie
@@ -32,16 +40,20 @@ module.exports = function socketHandler(io) {
       socket.join(`order_${orderId}`);
     });
 
-    // Livreur envoie sa position GPS (toutes les ~3-5 secondes)
+    // Livreur envoie sa position GPS (toutes les ~2-4 secondes)
     socket.on('update_location', async ({ driverId, lat, lng, orderId }) => {
       try {
+        // Valider les coordonnées
+        if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
         // Mettre à jour position courante du livreur
         await Driver.findByIdAndUpdate(driverId, {
           currentLocation: { lat, lng, updatedAt: new Date() },
         });
 
-        // Diffuser position à l'admin
-        io.to('admin').emit('driver_location', { driverId, lat, lng, timestamp: new Date() });
+        // Diffuser position à l'admin avec driverId en string pour cohérence
+        io.to('staff').emit('driver_location', { driverId: driverId.toString(), lat, lng, timestamp: new Date() });
 
         // Si commande en cours → enregistrer le trajet + notifier client
         if (orderId) {
@@ -49,7 +61,7 @@ module.exports = function socketHandler(io) {
             $push: { driverTrail: { lat, lng, timestamp: new Date() } },
           });
           io.to(`order_${orderId}`).emit('driver_location', { driverId, lat, lng });
-          io.to('admin').emit('driver_trail_update', { orderId, driverId, lat, lng, timestamp: new Date() });
+          io.to('staff').emit('driver_trail_update', { orderId, driverId, lat, lng, timestamp: new Date() });
         } else {
           // Vérifier si le livreur a une commande active
           const driver = await Driver.findById(driverId).select('currentOrder');
@@ -58,7 +70,7 @@ module.exports = function socketHandler(io) {
               $push: { driverTrail: { lat, lng, timestamp: new Date() } },
             });
             io.to(`order_${driver.currentOrder}`).emit('driver_location', { driverId, lat, lng });
-            io.to('admin').emit('driver_trail_update', {
+            io.to('staff').emit('driver_trail_update', {
               orderId: driver.currentOrder, driverId, lat, lng, timestamp: new Date(),
             });
           }
@@ -70,7 +82,7 @@ module.exports = function socketHandler(io) {
     socket.on('update_driver_status', async ({ driverId, status }) => {
       try {
         await Driver.findByIdAndUpdate(driverId, { status });
-        io.to('admin').emit('driver_status_update', { driverId, status, timestamp: new Date() });
+        io.to('staff').emit('driver_status_update', { driverId, status, timestamp: new Date() });
       } catch (e) { console.error('Erreur status:', e.message); }
     });
 

@@ -57,7 +57,7 @@ router.patch('/:id/status', async (req, res) => {
   try {
     const driver = await Driver.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
     if (!driver) return res.status(404).json({ success: false, message: 'Livreur introuvable' });
-    req.app.get('io').to('admin').emit('driver_status_update', { driverId: driver._id, status: req.body.status });
+    req.app.get('io').to('staff').emit('driver_status_update', { driverId: driver._id.toString(), status: req.body.status });
     res.json({ success: true, driver });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -69,9 +69,9 @@ router.patch('/:id/location', requireDriver, async (req, res) => {
     const driver = await Driver.findByIdAndUpdate(req.params.id,
       { currentLocation: { lat, lng, updatedAt: new Date() } }, { new: true });
     const io = req.app.get('io');
-    io.to('admin').emit('driver_location', { driverId: driver._id, lat, lng });
+    io.to('staff').emit('driver_location', { driverId: driver._id.toString(), lat, lng });
     if (driver.currentOrder)
-      io.to(`order_${driver.currentOrder}`).emit('driver_location', { driverId: driver._id, lat, lng });
+      io.to(`order_${driver.currentOrder}`).emit('driver_location', { driverId: driver._id.toString(), lat, lng });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

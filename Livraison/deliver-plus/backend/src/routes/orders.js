@@ -144,7 +144,7 @@ router.post('/', async (req, res) => {
           });
         });
 
-        io.to('admin').emit('order_broadcasted', {
+        io.to('staff').emit('order_broadcasted', {
           order: order.toObject(),
           nearbyDriversCount: nearby.length,
           driversNotified: nearby.map(d => ({
@@ -158,11 +158,11 @@ router.post('/', async (req, res) => {
         });
       } else {
         await order.save();
-        io.to('admin').emit('new_order', { order:order.toObject(), nearbyDriversCount:0 });
+        io.to('staff').emit('new_order', { order:order.toObject(), nearbyDriversCount:0 });
       }
     } else {
       await order.save();
-      io.to('admin').emit('new_order', { order:order.toObject() });
+      io.to('staff').emit('new_order', { order:order.toObject() });
     }
 
     res.status(201).json({ success:true, order });
@@ -202,7 +202,7 @@ router.post('/:id/accept', async (req, res) => {
     await driver.save();
 
     const io = req.app.get('io');
-    io.to('admin').emit('order_accepted', {
+    io.to('staff').emit('order_accepted', {
       orderId:    order._id,
       driverId:   driver._id,
       driverName: `${req.user.firstName} ${req.user.lastName}`,
@@ -270,7 +270,7 @@ router.patch('/:id/status', async (req, res) => {
 
     const io = req.app.get('io');
     io.to(`order_${order._id}`).emit('order_status_update', { orderId:order._id, status });
-    io.to('admin').emit('order_status_update', { orderId:order._id, status });
+    io.to('staff').emit('order_status_update', { orderId:order._id, status });
 
     // ── Livraison terminée → commission prélevée sur le solde du livreur ────
     if (status === 'livre' && order.driver && !order.commissionDeducted) {
@@ -289,7 +289,7 @@ router.patch('/:id/status', async (req, res) => {
         await driver.save();
         await Order.findByIdAndUpdate(order._id, { commissionDeducted: true });
 
-        io.to('admin').emit('order_completed', {
+        io.to('staff').emit('order_completed', {
           orderId: order._id, driverId: driver._id,
           commission, newDriverSolde: driver.solde,
         });

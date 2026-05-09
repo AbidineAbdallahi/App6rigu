@@ -4,39 +4,60 @@ import axios from 'axios';
 import { API_URL } from '../constants';
 
 const useAuthStore = create((set, get) => ({
-  user:          null,
-  token:         null,
-  driverProfile: null,
-  loading:       false,
-  error:         null,
-  initialized:   false,
+  user:             null,
+  token:            null,
+  driverProfile:    null,
+  loading:          false,
+  error:            null,
+  approvalStatus:   null,
+  missingDocuments: [],
+  missingInfoNote:  null,
+  initialized:      false,
 
   init: async () => {
     const token = await AsyncStorage.getItem('token');
     if (token) {
-      set({ token });
       try {
         const { data } = await axios.get(`${API_URL}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        set({ user: data.user, driverProfile: data.driverProfile });
+        const dp = data.driverProfile;
+        // Token validé côté serveur → on l'injecte en state seulement maintenant
+        set({
+          token,
+          user:             data.user,
+          driverProfile:    dp,
+          approvalStatus:   dp?.approvalStatus === 'incomplet' ? 'incomplet' : null,
+          missingDocuments: dp?.missingDocuments || [],
+          missingInfoNote:  dp?.missingInfoNote  || null,
+        });
       } catch {
         await AsyncStorage.removeItem('token');
-        set({ token: null });
+        // token reste null en state → écran de login
       }
     }
     set({ initialized: true });
   },
 
   login: async (email, password) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, approvalStatus: null });
     try {
       const { data } = await axios.post(`${API_URL}/auth/login`, { email, password });
       await AsyncStorage.setItem('token', data.token);
-      set({ token: data.token, user: data.user, driverProfile: data.driverProfile, loading: false });
-      return data.user.role;
+      set({
+        token: data.token, user: data.user, driverProfile: data.driverProfile, loading: false,
+        approvalStatus:   data.approvalStatus   || null,
+        missingDocuments: data.missingDocuments  || [],
+        missingInfoNote:  data.missingInfoNote   || null,
+      });
+      return data.approvalStatus === 'incomplet' ? 'incomplet' : data.user.role;
     } catch (err) {
-      set({ error: err.response?.data?.message || 'Erreur de connexion', loading: false });
+      const resp = err.response?.data;
+      set({
+        error: resp?.message || 'Erreur de connexion',
+        approvalStatus: resp?.approvalStatus || null,
+        loading: false,
+      });
       return null;
     }
   },
@@ -81,10 +102,10 @@ const useAuthStore = create((set, get) => ({
 
   logout: async () => {
     await AsyncStorage.removeItem('token');
-    set({ user: null, token: null, driverProfile: null, error: null });
+    set({ user: null, token: null, driverProfile: null, error: null, approvalStatus: null, missingDocuments: [], missingInfoNote: null });
   },
 
-  clearError: () => set({ error: null }),
+  clearError: () => set({ error: null, approvalStatus: null, missingDocuments: [], missingInfoNote: null }),
 }));
 
 export default useAuthStore;
