@@ -10,8 +10,23 @@ const userSchema = new mongoose.Schema({
   role:      { type: String, enum: ['client','driver','admin','agent'], default: 'client' },
   isActive:  { type: Boolean, default: true },
   address:   { street: String, city: { type: String, default: 'Nouakchott' }, zone: String },
-  otpCode:   { type: String, default: null },
-  otpExpiry: { type: Date,   default: null },
+  otpCode:        { type: String,  default: null },
+  otpExpiry:      { type: Date,    default: null },
+  isPhoneVerified:{ type: Boolean, default: true },
+  pushToken:       { type: String, default: null },
+  fcmToken:        { type: String, default: null },
+  referralCode:    { type: String, unique: true, sparse: true },
+  referralCredits: { type: Number, default: 0 },
+  referredBy:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  referralCount:   { type: Number, default: 0 },
+  favoriteAddresses: [{
+    _id:   { type: String, required: true },
+    icon:  { type: String, default: '📍' },
+    name:  { type: String, required: true },
+    label: { type: String, required: true },
+    lat:   { type: Number, required: true },
+    lng:   { type: Number, required: true },
+  }],
 }, { timestamps: true });
 
 userSchema.pre('save', async function(next) {

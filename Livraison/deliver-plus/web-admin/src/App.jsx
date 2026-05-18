@@ -15,7 +15,10 @@ import TrackingPage     from './pages/TrackingPage';
 import TarifsPage       from './pages/TarifsPage';
 import StatsPage        from './pages/StatsPage';
 import LiveMapPage         from './pages/LiveMapPage';
-import PendingDriversPage  from './pages/PendingDriversPage';
+import PendingDriversPage    from './pages/PendingDriversPage';
+import CancellationsPage   from './pages/CancellationsPage';
+import SettingsPage        from './pages/SettingsPage';
+import CreditSoldePage     from './pages/CreditSoldePage';
 
 function Guard({ adminOnly = false, children }) {
   const { token, user } = useAuthStore();
@@ -53,6 +56,9 @@ export default function App() {
           <Route path="agents/create"           element={<Guard adminOnly><CreateAgentPage /></Guard>} />
           <Route path="tarifs"                  element={<Guard adminOnly><TarifsPage /></Guard>} />
           <Route path="stats"                   element={<Guard adminOnly><StatsPage /></Guard>} />
+          <Route path="cancellations"           element={<Guard adminOnly><CancellationsPage /></Guard>} />
+          <Route path="settings"               element={<Guard adminOnly><SettingsPage /></Guard>} />
+          <Route path="credit-solde"           element={<Guard adminOnly><CreditSoldePage /></Guard>} />
         </Route>
       </Routes>
     </>

@@ -6,6 +6,7 @@ const driverSchema = new mongoose.Schema({
   zone:        { type: String, required: true },
   services:    { type: [String], enum: ['nourriture','courses','colis','pharmacie'],
                  default: ['nourriture','courses','colis','pharmacie'] },
+  driverType:  { type: String, enum: ['course','livraison'], default: null },
   status:      { type: String, enum: ['actif','pause','hors_ligne','suspendu'], default: 'hors_ligne' },
   currentLocation: {
     lat: { type: Number, default: 18.0858 },
@@ -40,8 +41,11 @@ const driverSchema = new mongoose.Schema({
   },
   approvalStatus:   { type: String, enum: ['en_attente','approuve','rejete','incomplet'], default: 'approuve' },
   rejectionReason:  { type: String, default: null },
-  missingDocuments: { type: [String], default: [] }, // liste des clés manquantes signalées par l'admin
-  missingInfoNote:  { type: String, default: null },  // message libre de l'admin
+  missingDocuments: { type: [String], default: [] },
+  missingInfoNote:  { type: String, default: null },
+  referralCode:     { type: String, unique: true, sparse: true },
+  referredBy:       { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', default: null },
+  referralCount:    { type: Number, default: 0 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Driver', driverSchema);

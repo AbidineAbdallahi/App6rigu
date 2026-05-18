@@ -1,11 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { View, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
 import useAuthStore from './src/stores/authStore';
+import useLangStore from './src/stores/langStore';
 import PhoneOtpLoginScreen from './src/screens/auth/PhoneOtpLoginScreen';
 import ClientNavigator from './src/navigation/ClientNavigator';
+import { registerForPushNotifications } from './src/services/notifications';
 import { COLORS } from './src/constants';
 
 function SplashScreen() {
@@ -37,8 +40,19 @@ function SplashScreen() {
 
 export default function App() {
   const { token, initialized, init } = useAuthStore();
+  const notifListenerRef = useRef(null);
 
-  useEffect(() => { init(); }, []);
+  useEffect(() => { init(); useLangStore.getState().initLang(); }, []);
+
+  // Enregistrer le push token dès que l'utilisateur est connecté
+  useEffect(() => {
+    if (token) {
+      registerForPushNotifications();
+      // Écouter les taps sur notifications (app en arrière-plan)
+      notifListenerRef.current = Notifications.addNotificationResponseReceivedListener(() => {});
+    }
+    return () => { notifListenerRef.current?.remove?.(); };
+  }, [token]);
 
   if (!initialized) {
     return (

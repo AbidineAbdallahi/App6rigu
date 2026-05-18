@@ -1,18 +1,93 @@
 rootProject.name = 'Deliver+'
 
+import groovy.json.JsonOutput
+
+def autolinkingDir = new File(rootDir, "build/generated/autolinking")
+autolinkingDir.mkdirs()
+def autolinkingFile = new File(autolinkingDir, "autolinking.json")
+
+if (!autolinkingFile.exists() || autolinkingFile.length() == 0) {
+    def mobileDir = rootDir.parentFile.absolutePath.replace('\\', '\\\\')
+    def androidDir = rootDir.absolutePath.replace('\\', '\\\\')
+    def autolinkingConfig = [
+        root: mobileDir,
+        reactNativePath: "${mobileDir}\\\\node_modules\\\\react-native",
+        reactNativeVersion: "0.81",
+        project: [
+            android: [
+                packageName: "mr.deliver.app",
+                sourceDir: androidDir,
+                appName: "main",
+                packageFolder: "mr/deliver/app",
+                mainActivity: ".MainActivity",
+                assets: [],
+                buildGradlePath: "${androidDir}\\\\app\\\\build.gradle",
+                settingsGradlePath: "${androidDir}\\\\settings.gradle",
+                assetsFolder: "${androidDir}\\\\app\\\\src\\\\main\\\\assets",
+                stringsPath: "${androidDir}\\\\app\\\\src\\\\main\\\\res\\\\values\\\\strings.xml",
+                manifestPath: "${androidDir}\\\\app\\\\src\\\\main\\\\AndroidManifest.xml"
+            ]
+        ],
+        dependencies: [:]
+    ]
+    autolinkingFile.text = JsonOutput.toJson(autolinkingConfig)
+    println ">>> autolinking.json generated"
+}
+
 dependencyResolutionManagement {
-  versionCatalogs {
-    reactAndroidLibs {
-      from(files(new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim(), "../gradle/libs.versions.toml")))
+    versionCatalogs {
+        reactAndroidLibs {
+            from(files(new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim(), "../gradle/libs.versions.toml")))
+        }
     }
-  }
 }
 
 apply from: new File(["node", "--print", "require.resolve('expo/package.json')"].execute(null, rootDir).text.trim(), "../scripts/autolinking.gradle");
 useExpoModules()
 
-apply from: new File(["node", "--print", "require.resolve('@react-native-community/cli-platform-android/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim(), "../native_modules.gradle");
-applyNativeModulesSettingsGradle(settings)
+def expoPackageJson = ["node", "--print", "require.resolve('expo/package.json')"].execute(null, rootDir).text.trim()
+def expoNestedModules = new File(expoPackageJson).getParentFile().toPath().resolve("node_modules").toFile()
+if (expoNestedModules.exists()) {
+    expoNestedModules.eachDir { moduleDir ->
+        def projectName = ":${moduleDir.name}"
+        if (!settings.findProject(projectName)) {
+            def androidDir = new File(moduleDir, "android")
+            if (new File(androidDir, "build.gradle").exists()) {
+                include projectName
+                project(projectName).projectDir = androidDir
+                println ">>> ${moduleDir.name} included from expo nested node_modules"
+            }
+        }
+    }
+}
 
 include ':app'
 includeBuild(new File(["node", "--print", "require.resolve('@react-native/gradle-plugin/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile())
+
+// Packages natifs — inclus manuellement car autolinking.json est vide
+include ':async-storage'
+project(':async-storage').projectDir = new File(rootDir, '../node_modules/@react-native-async-storage/async-storage/android')
+
+include ':react-native-safe-area-context'
+project(':react-native-safe-area-context').projectDir = new File(rootDir, '../node_modules/react-native-safe-area-context/android')
+
+include ':react-native-screens'
+project(':react-native-screens').projectDir = new File(rootDir, '../node_modules/react-native-screens/android')
+
+include ':react-native-maps'
+project(':react-native-maps').projectDir = new File(rootDir, '../node_modules/react-native-maps/android')
+
+include ':react-native-webrtc'
+project(':react-native-webrtc').projectDir = new File(rootDir, '../node_modules/react-native-webrtc/android')
+
+include ':react-native-webview'
+project(':react-native-webview').projectDir = new File(rootDir, '../node_modules/react-native-webview/android')
+
+include ':notifee_react-native'
+project(':notifee_react-native').projectDir = new File(rootDir, '../node_modules/@notifee/react-native/android')
+
+include ':react-native-firebase_app'
+project(':react-native-firebase_app').projectDir = new File(rootDir, '../node_modules/@react-native-firebase/app/android')
+
+include ':react-native-firebase_messaging'
+project(':react-native-firebase_messaging').projectDir = new File(rootDir, '../node_modules/@react-native-firebase/messaging/android')

@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import useAuthStore from '../../stores/authStore';
+import useLangStore from '../../stores/langStore';
+import { translations } from '../../i18n';
 import { COLORS } from '../../constants';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const { login, loading, error } = useAuthStore();
+  const { lang } = useLangStore();
+  const t = translations[lang] || translations.fr;
 
   const submit = async () => {
     const role = await login(email, password);
@@ -24,7 +28,7 @@ export default function LoginScreen({ navigation }) {
         </View>
 
         <View style={styles.form}>
-          {error && <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View>}
+          {error && <View style={styles.errorBox}><Text style={styles.errorText}>{t[error] || error}</Text></View>}
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email</Text>

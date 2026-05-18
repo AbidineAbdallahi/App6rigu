@@ -1,39 +1,49 @@
 import { useEffect, useState } from 'react';
 import api from '../services/api';
-
-const DOCS_META = [
-  { key:'carteIdentite',    label:"Carte d'identité", icon:'🪪' },
-  { key:'carteGrise',       label:'Carte grise',       icon:'📄' },
-  { key:'assurance',        label:'Assurance',          icon:'🛡️' },
-  { key:'photoVehicule',    label:'Photo véhicule',     icon:'🛵' },
-];
-
-const VEHICLE_LABELS = { moto:'Moto 🛵', voiture:'Voiture 🚗', velo:'Vélo 🚲', pied:'À pied 🚶' };
-
-const STATUS_CONFIG = {
-  en_attente: { label:'En attente',  color:'#854F0B', bg:'#FDF3E7', border:'#F0C98B' },
-  approuve:   { label:'Approuvé',    color:'#3B6D11', bg:'#EAF3DE', border:'#A8D47A' },
-  rejete:     { label:'Refusé',      color:'#A32D2D', bg:'#FDF0F0', border:'#F5C0C0' },
-  incomplet:  { label:'Incomplet',   color:'#185FA5', bg:'#E6F1FB', border:'#9BC4EC' },
-};
-
-const DOCS_LABELS = {
-  photoPersonnelle: 'Photo personnelle',
-  photoVehicule:    'Photo véhicule',
-  carteGrise:       'Carte grise',
-  carteIdentite:    "Carte d'identité",
-  assurance:        'Assurance',
-};
-
-const TABS = [
-  { key:'all',        label:'Tous les dossiers' },
-  { key:'en_attente', label:'En attente' },
-  { key:'incomplet',  label:'Incomplets' },
-  { key:'approuve',   label:'Approuvés' },
-  { key:'rejete',     label:'Refusés' },
-];
+import useLangStore from '../stores/langStore';
+import { translations } from '../i18n';
 
 export default function PendingDriversPage() {
+  const { lang } = useLangStore();
+  const t = translations[lang];
+
+  const DOCS_META = [
+    { key:'carteIdentite',    label: t.pend_doc_id,          icon:'🪪' },
+    { key:'carteGrise',       label: t.pend_doc_grise,       icon:'📄' },
+    { key:'assurance',        label: t.pend_doc_insurance,   icon:'🛡️' },
+    { key:'photoVehicule',    label: t.pend_doc_vehicle_img, icon:'🛵' },
+  ];
+
+  const VEHICLE_LABELS = {
+    moto:    `${t.cd_moto} 🛵`,
+    voiture: `${t.cd_voiture} 🚗`,
+    velo:    `${t.cd_velo} 🚲`,
+    pied:    `${t.cd_pied} 🚶`,
+  };
+
+  const STATUS_CONFIG = {
+    en_attente: { label: t.pend_status_pending,    color:'#854F0B', bg:'#FDF3E7', border:'#F0C98B' },
+    approuve:   { label: t.pend_status_approved,   color:'#3B6D11', bg:'#EAF3DE', border:'#A8D47A' },
+    rejete:     { label: t.pend_status_rejected,   color:'#A32D2D', bg:'#FDF0F0', border:'#F5C0C0' },
+    incomplet:  { label: t.pend_status_incomplete, color:'#185FA5', bg:'#E6F1FB', border:'#9BC4EC' },
+  };
+
+  const DOCS_LABELS = {
+    photoPersonnelle: t.pend_doc_photo,
+    photoVehicule:    t.pend_doc_vehicle_img,
+    carteGrise:       t.pend_doc_grise,
+    carteIdentite:    t.pend_doc_id,
+    assurance:        t.pend_doc_insurance,
+  };
+
+  const TABS = [
+    { key:'all',        label: t.tab_all },
+    { key:'en_attente', label: t.tab_pending },
+    { key:'incomplet',  label: t.tab_incomplete },
+    { key:'approuve',   label: t.tab_approved },
+    { key:'rejete',     label: t.tab_rejected },
+  ];
+
   const [drivers, setDrivers]           = useState([]);
   const [loading, setLoading]           = useState(true);
   const [selected, setSelected]         = useState(null);
@@ -43,8 +53,8 @@ export default function PendingDriversPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [activeTab, setActiveTab]       = useState('all');
   const [counts, setCounts]             = useState({});
-  const [showMissing, setShowMissing]   = useState(null);   // driver pour modal docs manquants
-  const [missingChecked, setMissingChecked] = useState({}); // { photoPersonnelle: true, ... }
+  const [showMissing, setShowMissing]   = useState(null);
+  const [missingChecked, setMissingChecked] = useState({});
   const [missingNote, setMissingNote]   = useState('');
 
   const load = async (tab = activeTab) => {
@@ -147,12 +157,10 @@ export default function PendingDriversPage() {
     <div>
       <div className="page-header">
         <div>
-          <h1>📋 Dossiers livreurs</h1>
-          <p style={{ fontSize:13, color:'#6b6b67', marginTop:2 }}>
-            Consultez et gérez les dossiers de tous vos livreurs.
-          </p>
+          <h1>{t.pend_title}</h1>
+          <p style={{ fontSize:13, color:'#6b6b67', marginTop:2 }}>{t.pend_subtitle}</p>
         </div>
-        <button className="btn-sm" onClick={() => { load(); loadCounts(); }}>🔄 Actualiser</button>
+        <button className="btn-sm" onClick={() => { load(); loadCounts(); }}>{t.pend_refresh}</button>
       </div>
 
       {/* ── Onglets ── */}
@@ -184,16 +192,16 @@ export default function PendingDriversPage() {
       </div>
 
       {loading ? (
-        <div style={{ textAlign:'center', padding:60, color:'#6b6b67' }}>Chargement...</div>
+        <div style={{ textAlign:'center', padding:60, color:'#6b6b67' }}>{t.pend_loading}</div>
       ) : drivers.length === 0 ? (
         <div className="card" style={{ textAlign:'center', padding:60 }}>
           <p style={{ fontSize:48, marginBottom:12 }}>📂</p>
-          <p style={{ fontSize:16, fontWeight:600 }}>Aucun dossier</p>
+          <p style={{ fontSize:16, fontWeight:600 }}>{t.pend_no_file}</p>
           <p style={{ fontSize:13, color:'#6b6b67', marginTop:6 }}>
-            {activeTab === 'en_attente' ? 'Aucun dossier en attente de validation.'
-            : activeTab === 'approuve'  ? 'Aucun livreur approuvé pour le moment.'
-            : activeTab === 'rejete'    ? 'Aucun dossier refusé.'
-            : 'Aucun livreur enregistré.'}
+            {activeTab === 'en_attente' ? t.pend_no_file_pending
+            : activeTab === 'approuve'  ? t.pend_no_file_approved
+            : activeTab === 'rejete'    ? t.pend_no_file_rejected
+            : t.pend_no_file_all}
           </p>
         </div>
       ) : (
@@ -202,9 +210,9 @@ export default function PendingDriversPage() {
           {/* ── Colonne liste ── */}
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
             {drivers.map(d => {
-              const missing   = docsComplete(d);
+              const missing    = docsComplete(d);
               const isSelected = selected?._id === d._id;
-              const cfg       = STATUS_CONFIG[d.approvalStatus] || STATUS_CONFIG.en_attente;
+              const cfg        = STATUS_CONFIG[d.approvalStatus] || STATUS_CONFIG.en_attente;
               return (
                 <div key={d._id} onClick={() => setSelected(isSelected ? null : d)}
                   style={{
@@ -232,7 +240,7 @@ export default function PendingDriversPage() {
                         📞 {d.user?.phone} · {VEHICLE_LABELS[d.vehicleType] || d.vehicleType}
                       </p>
                       <p style={{ fontSize:11, color:'#6b6b67', marginTop:1 }}>
-                        📍 {d.zone} · {new Date(d.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}
+                        📍 {d.zone} · {new Date(d.createdAt).toLocaleDateString(lang === 'ar' ? 'ar-SA' : 'fr-FR', { day:'2-digit', month:'short', year:'numeric' })}
                       </p>
                     </div>
 
@@ -241,22 +249,23 @@ export default function PendingDriversPage() {
                         {cfg.label}
                       </span>
                       {missing > 0
-                        ? <span style={{ fontSize:10, color:'#A32D2D' }}>⚠️ {missing} doc. manquant</span>
-                        : <span style={{ fontSize:10, color:'#3B6D11' }}>✅ Docs complets</span>}
+                        ? <span style={{ fontSize:10, color:'#A32D2D' }}>
+                            {t.pend_doc_missing_count.replace('{n}', missing)}
+                          </span>
+                        : <span style={{ fontSize:10, color:'#3B6D11' }}>{t.pend_doc_complete}</span>}
                     </div>
                   </div>
 
-                  {/* Boutons rapides selon statut */}
                   {d.approvalStatus === 'en_attente' && (
                     <div style={{ display:'flex', gap:6, marginTop:10 }}>
                       <button onClick={e => { e.stopPropagation(); approve(d._id); }}
                         disabled={actionLoading}
                         style={{ flex:1, padding:'7px', background:'#3B6D11', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:600 }}>
-                        ✅ Approuver
+                        {t.pend_approve}
                       </button>
                       <button onClick={e => { e.stopPropagation(); setShowReject(d); setRejectReason(''); }}
                         style={{ flex:1, padding:'7px', background:'#A32D2D', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:600 }}>
-                        ✕ Refuser
+                        {t.pend_reject}
                       </button>
                       <button onClick={e => { e.stopPropagation(); setShowMissing(d); const auto = {}; Object.keys(DOCS_LABELS).forEach(k => { if (!d.documents?.[k]) auto[k] = true; }); setMissingChecked(auto); setMissingNote(''); }}
                         style={{ padding:'7px 10px', background:'#E6F1FB', color:'#185FA5', border:'1px solid #9BC4EC', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:600 }}>
@@ -267,7 +276,7 @@ export default function PendingDriversPage() {
                   {d.approvalStatus === 'incomplet' && (
                     <div style={{ marginTop:8, background:'#E6F1FB', borderRadius:8, padding:'6px 10px' }}>
                       <p style={{ fontSize:11, color:'#185FA5', fontWeight:600 }}>
-                        📋 {(d.missingDocuments || []).length} élément(s) demandé(s) — en attente du livreur
+                        {t.pend_items_requested.replace('{n}', (d.missingDocuments || []).length)}
                       </p>
                     </div>
                   )}
@@ -276,7 +285,7 @@ export default function PendingDriversPage() {
                       <button onClick={e => { e.stopPropagation(); approve(d._id); }}
                         disabled={actionLoading}
                         style={{ width:'100%', padding:'7px', background:'#3B6D11', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:600 }}>
-                        ✅ Réapprouver le dossier
+                        {t.pend_reapprove}
                       </button>
                     </div>
                   )}
@@ -320,27 +329,26 @@ export default function PendingDriversPage() {
 
                     <div style={{ padding:'20px 24px', overflowY:'auto', maxHeight:'calc(100vh - 260px)' }}>
 
-                      {/* Motif de refus si refusé */}
                       {selected.approvalStatus === 'rejete' && selected.rejectionReason && (
                         <div style={{ background:'#FDF0F0', borderRadius:10, padding:12, border:'1px solid #F5C0C0', marginBottom:16 }}>
-                          <p style={{ fontSize:11, fontWeight:700, color:'#A32D2D', marginBottom:4 }}>MOTIF DE REFUS</p>
+                          <p style={{ fontSize:11, fontWeight:700, color:'#A32D2D', marginBottom:4 }}>{t.pend_reject_reason}</p>
                           <p style={{ fontSize:13, color:'#A32D2D' }}>{selected.rejectionReason}</p>
                         </div>
                       )}
 
                       <p style={{ fontSize:12, fontWeight:700, color:'#534AB7', textTransform:'uppercase', letterSpacing:.5, marginBottom:10 }}>
-                        Informations personnelles
+                        {t.pend_personal_info}
                       </p>
                       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:20 }}>
                         {[
-                          { label:'Prénom',      value: selected.user?.firstName },
-                          { label:'Nom',         value: selected.user?.lastName },
-                          { label:'Téléphone',   value: selected.user?.phone },
-                          { label:'Email',       value: selected.user?.email || '—' },
-                          { label:'Zone',        value: selected.zone },
-                          { label:'Véhicule',    value: VEHICLE_LABELS[selected.vehicleType] || selected.vehicleType },
-                          { label:'Inscription', value: new Date(selected.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' }) },
-                          { label:'Statut doc.', value: docsComplete(selected) === 0 ? '✅ Complet' : `⚠️ ${docsComplete(selected)} manquant(s)` },
+                          { label: t.f_firstname,  value: selected.user?.firstName },
+                          { label: t.f_lastname,   value: selected.user?.lastName },
+                          { label: t.f_phone,      value: selected.user?.phone },
+                          { label: t.f_email,      value: selected.user?.email || '—' },
+                          { label: t.f_zone,       value: selected.zone },
+                          { label: t.f_vehicle,    value: VEHICLE_LABELS[selected.vehicleType] || selected.vehicleType },
+                          { label: t.f_registered, value: new Date(selected.createdAt).toLocaleDateString(lang === 'ar' ? 'ar-SA' : 'fr-FR', { day:'2-digit', month:'long', year:'numeric' }) },
+                          { label: t.pend_stat_doc,value: docsComplete(selected) === 0 ? t.pend_complete : `⚠️ ${docsComplete(selected)} ${lang === 'ar' ? 'مفقود' : 'manquant(s)'}` },
                         ].map(f => (
                           <div key={f.label} style={{ background:'#F7F6F2', borderRadius:8, padding:'8px 10px' }}>
                             <p style={{ fontSize:10, color:'#6b6b67', marginBottom:2 }}>{f.label}</p>
@@ -350,7 +358,7 @@ export default function PendingDriversPage() {
                       </div>
 
                       <p style={{ fontSize:12, fontWeight:700, color:'#534AB7', textTransform:'uppercase', letterSpacing:.5, marginBottom:10 }}>
-                        Documents fournis
+                        {t.pend_docs_section}
                       </p>
                       <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:20 }}>
                         {DOCS_META.map(doc => {
@@ -361,13 +369,13 @@ export default function PendingDriversPage() {
                               <div style={{ flex:1 }}>
                                 <p style={{ fontSize:13, fontWeight:600, color:'#1a1a18' }}>{doc.label}</p>
                                 <p style={{ fontSize:11, color: url ? '#3B6D11' : '#A32D2D', marginTop:1 }}>
-                                  {url ? '✅ Document fourni' : '⚠️ Document manquant'}
+                                  {url ? t.pend_doc_provided : t.pend_doc_missing}
                                 </p>
                               </div>
                               {url && (
                                 <button onClick={() => setPreview(url)}
                                   style={{ padding:'5px 12px', background:'#534AB7', color:'#fff', border:'none', borderRadius:7, cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                                  👁 Voir
+                                  {t.pend_view}
                                 </button>
                               )}
                             </div>
@@ -375,36 +383,34 @@ export default function PendingDriversPage() {
                         })}
                       </div>
 
-                      {/* Docs manquants signalés (statut incomplet) */}
                       {selected.approvalStatus === 'incomplet' && (
                         <div style={{ background:'#E6F1FB', borderRadius:10, padding:14, border:'1px solid #9BC4EC', marginBottom:12 }}>
-                          <p style={{ fontSize:12, fontWeight:700, color:'#185FA5', marginBottom:6 }}>📋 DOCUMENTS / INFORMATIONS DEMANDÉS</p>
+                          <p style={{ fontSize:12, fontWeight:700, color:'#185FA5', marginBottom:6 }}>{t.pend_awaiting_docs}</p>
                           {(selected.missingDocuments || []).map(k => (
                             <p key={k} style={{ fontSize:13, color:'#185FA5', marginBottom:2 }}>· {DOCS_LABELS[k] || k}</p>
                           ))}
                           {selected.missingInfoNote && (
                             <p style={{ fontSize:12, color:'#185FA5', marginTop:6, fontStyle:'italic' }}>{selected.missingInfoNote}</p>
                           )}
-                          <p style={{ fontSize:11, color:'#185FA5', marginTop:8 }}>⏳ En attente de la réponse du livreur</p>
+                          <p style={{ fontSize:11, color:'#185FA5', marginTop:8 }}>{t.pend_awaiting_driver}</p>
                         </div>
                       )}
 
-                      {/* Actions selon statut */}
                       {selected.approvalStatus === 'en_attente' && (
                         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                           <div style={{ display:'flex', gap:10 }}>
                             <button onClick={() => approve(selected._id)} disabled={actionLoading}
                               style={{ flex:1, padding:'13px', background:'#3B6D11', color:'#fff', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:14 }}>
-                              ✅ Activer le compte
+                              {t.pend_activate}
                             </button>
                             <button onClick={() => { setShowReject(selected); setRejectReason(''); }}
                               style={{ flex:1, padding:'13px', background:'#A32D2D', color:'#fff', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:14 }}>
-                              ✕ Refuser
+                              {t.pend_reject}
                             </button>
                           </div>
                           <button onClick={() => { setShowMissing(selected); const auto = {}; Object.keys(DOCS_LABELS).forEach(k => { if (!selected.documents?.[k]) auto[k] = true; }); setMissingChecked(auto); setMissingNote(''); }}
                             style={{ padding:'11px', background:'#E6F1FB', color:'#185FA5', border:'1.5px solid #9BC4EC', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:13 }}>
-                            📋 Demander documents manquants
+                            {t.pend_request_docs}
                           </button>
                         </div>
                       )}
@@ -412,24 +418,24 @@ export default function PendingDriversPage() {
                         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                           <button onClick={() => approve(selected._id)} disabled={actionLoading}
                             style={{ padding:'13px', background:'#3B6D11', color:'#fff', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:14 }}>
-                            ✅ Activer le compte
+                            {t.pend_activate}
                           </button>
                           <button onClick={() => { setShowMissing(selected); const auto = {}; (selected.missingDocuments || []).forEach(k => auto[k] = true); setMissingChecked(auto); setMissingNote(selected.missingInfoNote || ''); }}
                             style={{ padding:'11px', background:'#E6F1FB', color:'#185FA5', border:'1.5px solid #9BC4EC', borderRadius:10, cursor:'pointer', fontWeight:600, fontSize:13 }}>
-                            ✏️ Modifier la demande
+                            {t.pend_modify_request}
                           </button>
                           <button onClick={() => { setShowReject(selected); setRejectReason(''); }}
                             style={{ padding:'11px', background:'#A32D2D', color:'#fff', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:13 }}>
-                            ✕ Refuser définitivement
+                            {t.pend_reject_final}
                           </button>
                         </div>
                       )}
                       {selected.approvalStatus === 'approuve' && (
                         <div style={{ background:'#EAF3DE', borderRadius:10, padding:14, textAlign:'center' }}>
-                          <p style={{ fontSize:13, color:'#3B6D11', fontWeight:600 }}>✅ Compte activé — livreur opérationnel</p>
+                          <p style={{ fontSize:13, color:'#3B6D11', fontWeight:600 }}>{t.pend_account_active}</p>
                           <button onClick={() => { setShowReject(selected); setRejectReason(''); }}
                             style={{ marginTop:10, padding:'8px 20px', background:'#A32D2D', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:600 }}>
-                            ✕ Révoquer l'accès
+                            {t.pend_revoke}
                           </button>
                         </div>
                       )}
@@ -437,7 +443,7 @@ export default function PendingDriversPage() {
                         <div style={{ display:'flex', gap:10 }}>
                           <button onClick={() => approve(selected._id)} disabled={actionLoading}
                             style={{ flex:1, padding:'13px', background:'#3B6D11', color:'#fff', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:14 }}>
-                            ✅ Réapprouver le dossier
+                            {t.pend_reapprove}
                           </button>
                         </div>
                       )}
@@ -454,12 +460,12 @@ export default function PendingDriversPage() {
       {showMissing && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:24 }}>
           <div style={{ background:'#fff', borderRadius:16, padding:28, width:'100%', maxWidth:480 }}>
-            <p style={{ fontWeight:700, fontSize:17, marginBottom:4 }}>📋 Documents / informations manquants</p>
+            <p style={{ fontWeight:700, fontSize:17, marginBottom:4 }}>{t.pend_missing_title}</p>
             <p style={{ fontSize:13, color:'#6b6b67', marginBottom:16 }}>
-              <strong>{showMissing.user?.firstName} {showMissing.user?.lastName}</strong> sera notifié et pourra compléter son dossier depuis l'application.
+              <strong>{showMissing.user?.firstName} {showMissing.user?.lastName}</strong> {t.pend_missing_notified}
             </p>
 
-            <p style={{ fontSize:12, fontWeight:700, color:'#534AB7', marginBottom:8 }}>Sélectionner ce qui manque :</p>
+            <p style={{ fontSize:12, fontWeight:700, color:'#534AB7', marginBottom:8 }}>{t.pend_select_missing}</p>
             <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:16 }}>
               {Object.entries(DOCS_LABELS).map(([key, label]) => {
                 const hasDoc = showMissing.documents?.[key];
@@ -470,26 +476,26 @@ export default function PendingDriversPage() {
                       style={{ width:16, height:16 }} />
                     <span style={{ flex:1, fontSize:13, fontWeight:600 }}>{label}</span>
                     {hasDoc
-                      ? <span style={{ fontSize:11, color:'#3B6D11' }}>✅ Déjà fourni</span>
-                      : <span style={{ fontSize:11, color:'#A32D2D' }}>⚠️ Manquant</span>}
+                      ? <span style={{ fontSize:11, color:'#3B6D11' }}>{t.pend_already_provided}</span>
+                      : <span style={{ fontSize:11, color:'#A32D2D' }}>{t.pend_still_missing}</span>}
                   </label>
                 );
               })}
             </div>
 
-            <p style={{ fontSize:12, fontWeight:700, color:'#534AB7', marginBottom:6 }}>Message additionnel (optionnel) :</p>
+            <p style={{ fontSize:12, fontWeight:700, color:'#534AB7', marginBottom:6 }}>{t.pend_add_note}</p>
             <textarea value={missingNote} onChange={e => setMissingNote(e.target.value)}
-              placeholder="Ex : La photo d'identité est illisible, veuillez en soumettre une nouvelle..."
+              placeholder={t.pend_note_ph}
               style={{ width:'100%', minHeight:80, borderRadius:10, border:'1px solid #D3D1C7', padding:12, fontSize:13, resize:'vertical', boxSizing:'border-box', fontFamily:'inherit', marginBottom:14 }}
             />
             <div style={{ display:'flex', gap:8 }}>
               <button onClick={() => setShowMissing(null)}
                 style={{ flex:1, padding:'12px', background:'#F7F6F2', border:'.5px solid #D3D1C7', borderRadius:10, cursor:'pointer', fontWeight:600, fontSize:13 }}>
-                Annuler
+                {t.btn_cancel}
               </button>
               <button onClick={requestMissingDocs} disabled={actionLoading || Object.values(missingChecked).every(v => !v)}
                 style={{ flex:2, padding:'12px', background:'#185FA5', color:'#fff', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:13, opacity: Object.values(missingChecked).every(v => !v) ? 0.5 : 1 }}>
-                {actionLoading ? 'Envoi...' : '📤 Notifier le livreur'}
+                {actionLoading ? t.pend_sending : t.pend_notify}
               </button>
             </div>
           </div>
@@ -501,23 +507,26 @@ export default function PendingDriversPage() {
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:24 }}>
           <div style={{ background:'#fff', borderRadius:16, padding:28, width:'100%', maxWidth:460 }}>
             <p style={{ fontWeight:700, fontSize:17, marginBottom:6 }}>
-              {showReject.approvalStatus === 'approuve' ? 'Révoquer l\'accès' : 'Motif de refus'}
+              {showReject.approvalStatus === 'approuve' ? t.pend_revoke_title : t.pend_reject_title}
             </p>
             <p style={{ fontSize:13, color:'#6b6b67', marginBottom:16 }}>
-              Le livreur <strong>{showReject.user?.firstName} {showReject.user?.lastName}</strong> sera notifié.
+              {lang === 'ar'
+                ? <><strong>{showReject.user?.firstName} {showReject.user?.lastName}</strong> {t.pend_will_notify}</>
+                : <>Le livreur <strong>{showReject.user?.firstName} {showReject.user?.lastName}</strong> {t.pend_will_notify}</>
+              }
             </p>
             <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
-              placeholder="Ex : Photo d'identité illisible, informations incomplètes, assurance expirée..."
+              placeholder={t.pend_reject_ph}
               style={{ width:'100%', minHeight:100, borderRadius:10, border:'1px solid #D3D1C7', padding:12, fontSize:13, resize:'vertical', boxSizing:'border-box', fontFamily:'inherit' }}
             />
             <div style={{ display:'flex', gap:8, marginTop:14 }}>
               <button onClick={() => setShowReject(null)}
                 style={{ flex:1, padding:'12px', background:'#F7F6F2', border:'.5px solid #D3D1C7', borderRadius:10, cursor:'pointer', fontWeight:600, fontSize:13 }}>
-                Annuler
+                {t.btn_cancel}
               </button>
               <button onClick={() => reject(showReject._id)} disabled={actionLoading}
                 style={{ flex:2, padding:'12px', background:'#A32D2D', color:'#fff', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:13 }}>
-                {actionLoading ? 'Envoi...' : '✕ Confirmer'}
+                {actionLoading ? t.pend_sending : t.pend_confirm}
               </button>
             </div>
           </div>

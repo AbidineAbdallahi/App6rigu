@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MapView, { Marker, Circle, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { io } from 'socket.io-client';
 import useAuthStore from '../../stores/authStore';
 import useOrderStore from '../../stores/orderStore';
+import useLangStore from '../../stores/langStore';
+import { translations } from '../../i18n';
 import { COLORS, SOCKET_URL } from '../../constants';
+import LeafletMap from '../../components/LeafletMap';
 
-const NOUAKCHOTT = { latitude: 18.0735, longitude: -15.9582, latitudeDelta: 0.01, longitudeDelta: 0.01 };
+const NOUAKCHOTT = { latitude: 18.0735, longitude: -15.9582 };
 
 function parseCoords(addr) {
   const raw = addr?.label || addr?.zone || addr?.street || '';
@@ -36,8 +38,11 @@ function useReverseGeo(lat, lng) {
 export default function DriverMapScreen() {
   const { token, driverProfile } = useAuthStore();
   const { currentOrder } = useOrderStore();
+  const { lang } = useLangStore();
+  const t = translations[lang] || translations.fr;
   const insets = useSafeAreaInsets();
   const bottomBar = Math.max(insets.bottom, 8);
+
   const [myPos,    setMyPos]    = useState(null);
   const [speed,    setSpeed]    = useState(0);
   const [accuracy, setAccuracy] = useState(null);
@@ -47,14 +52,30 @@ export default function DriverMapScreen() {
   const socketRef = useRef(null);
   const watchRef  = useRef(null);
 
-  const pickupCoords   = currentOrder ? parseCoords(currentOrder.pickupAddress)   : null;
-  const deliveryCoords = currentOrder ? parseCoords(currentOrder.deliveryAddress)  : null;
+  const pickupCoords   = currentOrder ? parseCoords(currentOrder.pickupAddress)  : null;
+  const deliveryCoords = currentOrder ? parseCoords(currentOrder.deliveryAddress) : null;
   const isEnRoute      = currentOrder?.status === 'en_route';
   const activeCoords   = isEnRoute ? deliveryCoords : pickupCoords;
-  const activeLabel    = isEnRoute ? 'Livraison' : 'Retrait';
   const lineColor      = isEnRoute ? COLORS.blue : COLORS.green;
 
   const destGeo = useReverseGeo(activeCoords?.latitude, activeCoords?.longitude);
+
+  // Sync driver position
+  useEffect(() => {
+    if (myPos) mapRef.current?.setDriver(myPos.lat, myPos.lng, accuracy);
+  }, [myPos, accuracy]);
+
+  // Sync pickup marker
+  useEffect(() => {
+    if (pickupCoords) mapRef.current?.setPickup(pickupCoords.latitude, pickupCoords.longitude);
+    else mapRef.current?.setPickup(null, null);
+  }, [pickupCoords?.latitude, pickupCoords?.longitude]);
+
+  // Sync delivery marker
+  useEffect(() => {
+    if (deliveryCoords) mapRef.current?.setDelivery(deliveryCoords.latitude, deliveryCoords.longitude);
+    else mapRef.current?.setDelivery(null, null);
+  }, [deliveryCoords?.latitude, deliveryCoords?.longitude]);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { auth: { token } });
@@ -64,17 +85,14 @@ export default function DriverMapScreen() {
     return () => { socket.disconnect(); watchRef.current?.remove?.(); };
   }, []);
 
-  // Recadrer la carte quand la commande change de statut
+  // Recadrer quand la commande change de statut
   useEffect(() => {
     if (!activeCoords) return;
     setTimeout(() => {
       const coords = myPos
-        ? [{ latitude: myPos.lat, longitude: myPos.lng }, activeCoords]
-        : [activeCoords];
-      mapRef.current?.fitToCoordinates(coords, {
-        edgePadding: { top: 100, right: 50, bottom: 160, left: 50 },
-        animated: true,
-      });
+        ? [[myPos.lat, myPos.lng], [activeCoords.latitude, activeCoords.longitude]]
+        : [[activeCoords.latitude, activeCoords.longitude]];
+      mapRef.current?.fitCoords(coords);
     }, 800);
   }, [currentOrder?._id, currentOrder?.status]);
 
@@ -86,11 +104,8 @@ export default function DriverMapScreen() {
     const { latitude: lat, longitude: lng } = current.coords;
     setMyPos({ lat, lng });
     setReady(true);
-    mapRef.current?.animateToRegion(
-      { latitude: lat, longitude: lng, latitudeDelta: 0.008, longitudeDelta: 0.008 },
-      600
-    );
-    // Envoyer la position immédiatement à l'ouverture de l'écran carte
+    mapRef.current?.centerMap(lat, lng, 15);
+
     socketRef.current?.emit('update_location', {
       driverId: driverProfile?._id, lat, lng, orderId: currentOrder?._id,
     });
@@ -102,12 +117,7 @@ export default function DriverMapScreen() {
         setMyPos({ lat: latitude, lng: longitude });
         setSpeed(Math.round((spd || 0) * 3.6));
         setAccuracy(acc ? Math.round(acc) : null);
-        if (!activeCoords) {
-          mapRef.current?.animateToRegion(
-            { latitude, longitude, latitudeDelta: 0.008, longitudeDelta: 0.008 },
-            400
-          );
-        }
+        if (!activeCoords) mapRef.current?.centerMap(latitude, longitude, 15);
         socketRef.current?.emit('update_location', {
           driverId: driverProfile?._id, lat: latitude, lng: longitude,
           orderId: currentOrder?._id,
@@ -119,75 +129,15 @@ export default function DriverMapScreen() {
   const fitToRoute = () => {
     if (!myPos) return;
     if (activeCoords) {
-      mapRef.current?.fitToCoordinates(
-        [{ latitude: myPos.lat, longitude: myPos.lng }, activeCoords],
-        { edgePadding: { top: 100, right: 50, bottom: 160, left: 50 }, animated: true }
-      );
+      mapRef.current?.fitCoords([[myPos.lat, myPos.lng], [activeCoords.latitude, activeCoords.longitude]]);
     } else {
-      mapRef.current?.animateToRegion(
-        { latitude: myPos.lat, longitude: myPos.lng, latitudeDelta: 0.008, longitudeDelta: 0.008 },
-        400
-      );
+      mapRef.current?.centerMap(myPos.lat, myPos.lng, 15);
     }
   };
 
   return (
     <View style={styles.container}>
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={NOUAKCHOTT}
-        showsCompass
-        showsScale
-        mapType="standard"
-      >
-        {/* Ligne de trajet (droite pointillée) */}
-        {myPos && activeCoords && (
-          <Polyline
-            coordinates={[
-              { latitude: myPos.lat, longitude: myPos.lng },
-              activeCoords,
-            ]}
-            strokeColor={lineColor}
-            strokeWidth={3}
-            lineDashPattern={[10, 5]}
-          />
-        )}
-
-        {/* Position du livreur */}
-        {myPos && (
-          <>
-            <Marker coordinate={{ latitude: myPos.lat, longitude: myPos.lng }} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={styles.dot}>
-                <View style={styles.dotInner} />
-              </View>
-            </Marker>
-            {accuracy != null && (
-              <Circle
-                center={{ latitude: myPos.lat, longitude: myPos.lng }}
-                radius={accuracy}
-                strokeColor="rgba(83,74,183,0.3)"
-                fillColor="rgba(83,74,183,0.08)"
-              />
-            )}
-          </>
-        )}
-
-        {/* Marqueur retrait */}
-        {pickupCoords && (
-          <Marker coordinate={pickupCoords} title="Retrait" anchor={{ x: 0.5, y: 1 }}>
-            <Text style={styles.markerEmoji}>📍</Text>
-          </Marker>
-        )}
-
-        {/* Marqueur livraison */}
-        {deliveryCoords && (
-          <Marker coordinate={deliveryCoords} title="Livraison" anchor={{ x: 0.5, y: 1 }}>
-            <Text style={styles.markerEmoji}>🏠</Text>
-          </Marker>
-        )}
-      </MapView>
+      <LeafletMap ref={mapRef} style={styles.map} />
 
       {/* Badges haut */}
       <View style={[styles.topRow, { top: Math.max(insets.top, 16) }]}>
@@ -198,13 +148,13 @@ export default function DriverMapScreen() {
         <View style={[styles.statusBadge, ready ? styles.badgeLive : styles.badgeWait]}>
           {ready && <View style={styles.liveDot} />}
           <Text style={[styles.badgeTxt, { color: ready ? '#27500A' : '#633806' }]}>
-            {ready ? 'EN DIRECT' : 'Acquisition GPS…'}
+            {ready ? t.map_live : t.map_gps}
           </Text>
         </View>
         {currentOrder && (
           <View style={[styles.orderBadge, { backgroundColor: isEnRoute ? COLORS.blueLight : COLORS.greenLight }]}>
             <Text style={[styles.orderBadgeTxt, { color: isEnRoute ? COLORS.blue : COLORS.green }]}>
-              {isEnRoute ? '🚗 En route' : '📦 Récupération'}
+              {isEnRoute ? t.map_en_route_badge : t.map_pickup_badge}
             </Text>
           </View>
         )}
@@ -225,7 +175,7 @@ export default function DriverMapScreen() {
             <Text style={styles.destEmoji}>{isEnRoute ? '🏠' : '📍'}</Text>
             <View style={{ flex: 1 }}>
               <Text style={styles.destTitle}>
-                {isEnRoute ? 'Livrer chez le client' : 'Récupérer la commande'}
+                {isEnRoute ? t.map_deliver_title : t.map_retrieve_title}
               </Text>
               <Text style={styles.destAddr} numberOfLines={2}>
                 {destGeo || (activeCoords
@@ -253,9 +203,6 @@ export default function DriverMapScreen() {
 const styles = StyleSheet.create({
   container:    { flex: 1 },
   map:          { flex: 1 },
-  dot:          { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(83,74,183,0.25)', alignItems: 'center', justifyContent: 'center' },
-  dotInner:     { width: 14, height: 14, borderRadius: 7, backgroundColor: COLORS.purple, borderWidth: 2.5, borderColor: '#fff' },
-  markerEmoji:  { fontSize: 32 },
   topRow:       { position: 'absolute', left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   speedCard:    { backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, elevation: 4 },
   speedNum:     { fontSize: 22, fontWeight: '800', color: COLORS.text, lineHeight: 24 },

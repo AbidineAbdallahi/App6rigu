@@ -3,7 +3,8 @@ const mongoose = require('mongoose');
 const orderSchema = new mongoose.Schema({
   client:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   driver:      { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', default: null },
-  serviceType: { type: String, enum: ['nourriture','courses','colis','pharmacie'], required: true },
+  orderType:   { type: String, enum: ['course','livraison'], required: true },
+  serviceType: { type: String, enum: ['nourriture','courses','colis','pharmacie'], default: null },
   items: [{ name: String, quantity: { type: Number, default: 1 }, price: Number }],
   pickupAddress: { label: String, street: String, zone: String, lat: Number, lng: Number },
   deliveryAddress: { label: String, street: String, zone: String, lat: Number, lng: Number },
@@ -36,7 +37,14 @@ const orderSchema = new mongoose.Schema({
   driverTrail: [{ lat: Number, lng: Number, timestamp: { type: Date, default: Date.now } }],
   // Commission prélevée
   commissionDeducted: { type: Boolean, default: false },
-  estimatedTime: { type: Number, default: 0 },
+  trajetOuvert:      { type: Boolean, default: false },
+  cancelledBy:              { type: String, enum: ['client', 'driver'], default: null },
+  cancellationReason:       { type: String, default: null },
+  driverCancellationPending:{ type: Boolean, default: false },
+  actualDistanceKm:  { type: Number, default: null },
+  actualDurationMin: { type: Number, default: null },
+  estimatedTime:     { type: Number, default: 0 },
+  creditsApplied: { type: Number, default: 0 },
   rating:  { score: { type: Number, min: 1, max: 5, default: null }, comment: String },
   notes:   { type: String, default: '' },
 }, { timestamps: true });

@@ -1,10 +1,58 @@
-const express = require('express');
-const User   = require('../models/User');
-const Driver = require('../models/Driver');
-const Order  = require('../models/Order');
+const express  = require('express');
+const https    = require('https');
+const User     = require('../models/User');
+const Driver   = require('../models/Driver');
+const Order    = require('../models/Order');
+const Settings = require('../models/Settings');
 const { requireAdmin, requireAgent } = require('../middleware/auth');
+const { sendFcmToDriver } = require('../utils/fcm');
 
 const router = express.Router();
+
+// Envoie des push notifications via l'API Expo
+function sendExpoPush(tokens, title, body, data = {}) {
+  const messages = tokens
+    .filter(t => typeof t === 'string' && t.startsWith('ExponentPushToken['))
+    .map(token => ({
+      to: token,
+      sound: 'default',
+      title,
+      body,
+      data,
+      priority: 'high',
+      channelId: 'orders',
+      ttl: 60,
+    }));
+
+  if (!messages.length) return Promise.resolve();
+
+  const payload = JSON.stringify(messages);
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'exp.host',
+      path: '/--/api/v2/push/send',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        'Accept': 'application/json',
+      },
+    }, (res) => {
+      let raw = '';
+      res.on('data', chunk => raw += chunk);
+      res.on('end', () => {
+        console.log(`📲 Push envoyé à ${messages.length} livreur(s)`);
+        resolve();
+      });
+    });
+    req.on('error', (e) => {
+      console.error('Push error:', e.message);
+      resolve();
+    });
+    req.write(payload);
+    req.end();
+  });
+}
 
 function haversine(lat1, lng1, lat2, lng2) {
   const R = 6371;
@@ -56,6 +104,7 @@ router.post('/orders', requireAgent, async (req, res) => {
     const {
       serviceType, pickupAddress, deliveryAddress,
       price, broadcastRadius = 5, commissionPercent = 15,
+      orderType = 'course',
     } = req.body;
 
     if (!serviceType || !pickupAddress?.lat || !deliveryAddress?.lat || !price) {
@@ -67,6 +116,7 @@ router.post('/orders', requireAgent, async (req, res) => {
 
     const order = await Order.create({
       client: req.user._id,
+      orderType,
       serviceType,
       pickupAddress,
       deliveryAddress,
@@ -86,7 +136,7 @@ router.post('/orders', requireAgent, async (req, res) => {
     const io = req.app.get('io');
 
     const allActive = await Driver.find({ status: 'actif', currentOrder: null })
-      .populate('user', 'firstName lastName');
+      .populate('user', 'firstName lastName pushToken fcmToken');
 
     console.log(`\n📡 DIFFUSION COMMANDE ${order._id}`);
     console.log(`   Livreurs actifs en BD : ${allActive.length}`);
@@ -106,6 +156,15 @@ router.post('/orders', requireAgent, async (req, res) => {
 
     console.log(`   Dans le rayon (${broadcastRadius}km) : ${nearby.length} livreur(s)`);
 
+    // Push notification à TOUS les livreurs actifs (même hors app)
+    const allPushTokens = allActive.map(d => d.user?.pushToken).filter(Boolean);
+    sendExpoPush(
+      allPushTokens,
+      '🛵 Nouvelle course disponible',
+      `${serviceType || 'Course'} · ${Number(price)} MRU`,
+      { orderId: order._id.toString(), type: 'new_order' }
+    );
+
     if (nearby.length > 0) {
       order.status          = 'diffuse';
       order.notifiedDrivers = nearby.map(d => d._id);
@@ -114,6 +173,22 @@ router.post('/orders', requireAgent, async (req, res) => {
       nearby.forEach(d => {
         const dist = haversine(pickupAddress.lat, pickupAddress.lng,
                                d.currentLocation.lat, d.currentLocation.lng);
+
+        // FCM data-only → réveille l'app même fermée → plein écran Notifee
+        const fcmToken = d.user?.fcmToken;
+        if (fcmToken) {
+          sendFcmToDriver(fcmToken, {
+            type:      'new_order',
+            orderId:   order._id.toString(),
+            orderType: order.orderType || 'course',
+            total:     String(price),
+            distance:  dist.toFixed(1),
+          }).catch(() => {});
+          console.log(`  [FCM] → ${d.user?.firstName} ${d.user?.lastName}`);
+        } else {
+          console.log(`  [FCM] ❌ ${d.user?.firstName} ${d.user?.lastName} — pas de token FCM`);
+        }
+
         io.to(`driver_${d._id}`).emit('new_order_nearby', {
           order:            order.toObject(),
           distance:         dist.toFixed(1),
@@ -192,12 +267,13 @@ router.post('/drivers', requireAdmin, async (req, res) => {
 // PATCH /api/admin/drivers/:id
 router.patch('/drivers/:id', requireAdmin, async (req, res) => {
   try {
-    const { status, zone, services, vehicleType, motif } = req.body;
+    const { status, zone, services, vehicleType, driverType, motif } = req.body;
     const update = {};
-    if (status)      update.status      = status;
-    if (zone)        update.zone        = zone;
-    if (services)    update.services    = services;
-    if (vehicleType) update.vehicleType = vehicleType;
+    if (status)                         update.status      = status;
+    if (zone)                           update.zone        = zone;
+    if (services)                       update.services    = services;
+    if (vehicleType)                    update.vehicleType = vehicleType;
+    if (driverType !== undefined)       update.driverType  = driverType;
 
     const driver = await Driver.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!driver) return res.status(404).json({ success: false, message: 'Livreur introuvable' });
@@ -346,6 +422,100 @@ router.patch('/drivers/:id/reject', requireAdmin, async (req, res) => {
       message: reason || 'Votre dossier a été refusé. Contactez l\'administrateur.',
     });
     res.json({ success: true, driver });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── Annulations livreurs en attente de vérification ─────────────────────────
+
+// GET /api/admin/orders/pending-cancellations
+router.get('/orders/pending-cancellations', requireAdmin, async (req, res) => {
+  try {
+    const orders = await Order.find({ driverCancellationPending: true })
+      .populate('client', 'firstName lastName phone')
+      .populate({ path: 'driver', populate: { path: 'user', select: 'firstName lastName phone' } })
+      .sort({ updatedAt: -1 });
+    res.json({ success: true, orders });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// POST /api/admin/orders/:id/release-driver
+router.post('/orders/:id/release-driver', requireAdmin, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, message: 'Commande introuvable' });
+    if (!order.driverCancellationPending)
+      return res.status(400).json({ success: false, message: 'Aucune vérification en attente' });
+
+    if (order.driver) {
+      await Driver.findByIdAndUpdate(order.driver, { currentOrder: null });
+      req.app.get('io').to(`driver_${order.driver}`).emit('order_cancelled_released', {
+        message: 'Votre annulation a été vérifiée. Vous pouvez recevoir de nouvelles commandes.',
+      });
+    }
+
+    await Order.findByIdAndUpdate(order._id, { driverCancellationPending: false });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── POST /api/admin/drivers/credit-by-phone ────────────────────────────────
+// Recharge manuelle : l'admin tape le numéro de téléphone du livreur + montant
+router.post('/drivers/credit-by-phone', requireAdmin, async (req, res) => {
+  try {
+    const { phone, montant, motif } = req.body;
+    if (!phone?.trim())
+      return res.status(400).json({ success: false, message: 'Numéro de téléphone requis' });
+    if (!montant || isNaN(montant) || Number(montant) <= 0)
+      return res.status(400).json({ success: false, message: 'Montant invalide' });
+
+    const user = await User.findOne({ phone: phone.trim() });
+    if (!user) return res.status(404).json({ success: false, message: 'Aucun utilisateur avec ce numéro' });
+
+    const driver = await Driver.findOne({ user: user._id });
+    if (!driver) return res.status(404).json({ success: false, message: 'Ce numéro n\'appartient pas à un livreur' });
+
+    driver.solde += Number(montant);
+    driver.transactions.push({
+      type: 'credit',
+      montant: Number(montant),
+      motif: motif?.trim() || 'Recharge manuelle admin',
+    });
+    await driver.save();
+
+    req.app.get('io').to(`driver_${driver._id}`).emit('solde_updated', {
+      solde: driver.solde,
+      message: `+${montant} MRU ajoutés à votre solde.`,
+    });
+
+    res.json({
+      success: true,
+      driver: {
+        name: `${user.firstName} ${user.lastName}`,
+        phone: user.phone,
+        newSolde: driver.solde,
+      },
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── GET /api/admin/settings ─────────────────────────────────────────────────
+router.get('/settings', requireAdmin, async (req, res) => {
+  try {
+    const s = await Settings.get();
+    res.json({ success: true, settings: s });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ─── PATCH /api/admin/settings ───────────────────────────────────────────────
+router.patch('/settings', requireAdmin, async (req, res) => {
+  try {
+    const allowed = ['referralEnabled','referralClientBonus','referralDriverBonus','referralStartDate','referralEndDate'];
+    const update  = {};
+    allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
+
+    const s = await Settings.findOneAndUpdate({}, { $set: update }, { new: true, upsert: true });
+    req.app.get('io').to('staff').emit('settings_updated', { referralEnabled: s.referralEnabled });
+    res.json({ success: true, settings: s });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

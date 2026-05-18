@@ -7,9 +7,17 @@ const { body, validationResult } = require('express-validator');
 const User   = require('../models/User');
 const Driver = require('../models/Driver');
 const { verifyToken } = require('../middleware/auth');
+const { isReferralActive, getReferralBonus } = require('../utils/referral');
 
 const router = express.Router();
 const sign = id => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+
+// Validation numéro mauritanien : 8 chiffres, commence par 2, 3 ou 4 (hors préfixe +222)
+const isValidPhone = (phone) => {
+  const digits = phone.replace(/[\s\-\.]/g, '').replace(/^\+?222/, '');
+  return /^[234]\d{7}$/.test(digits);
+};
+const PHONE_ERROR = 'Numéro invalide. Doit contenir 8 chiffres et commencer par 2, 3 ou 4.';
 
 // ─── Multer : upload documents livreur ───────────────────────────────────────
 const storage = multer.diskStorage({
@@ -122,6 +130,150 @@ router.get('/me', verifyToken, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// POST /api/auth/register-client — inscription client (phone + nom + mot de passe) puis OTP
+router.post('/register-client', async (req, res) => {
+  try {
+    const { phone, firstName, lastName, password } = req.body;
+    if (!phone || !firstName || !lastName || !password)
+      return res.status(400).json({ success: false, message: 'Champs obligatoires manquants' });
+    if (password.length < 6)
+      return res.status(400).json({ success: false, message: 'Mot de passe trop court (6 caractères minimum)' });
+
+    if (!isValidPhone(phone))
+      return res.status(400).json({ success: false, message: PHONE_ERROR });
+
+    const existing = await User.findOne({ phone }).select('+password');
+    if (existing && existing.isPhoneVerified && existing.password)
+      return res.status(400).json({ success: false, message: 'Ce numéro est déjà utilisé. Connectez-vous.' });
+
+    const otp    = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = new Date(Date.now() + 120 * 1000); // 2 minutes
+
+    if (existing) {
+      existing.firstName = firstName.trim();
+      existing.lastName  = lastName.trim();
+      existing.password  = password;
+      existing.role      = 'client';
+      existing.isPhoneVerified = false;
+      existing.otpCode   = otp;
+      existing.otpExpiry = expiry;
+      await existing.save();
+    } else {
+      await User.create({
+        phone, firstName: firstName.trim(), lastName: lastName.trim(),
+        password, role: 'client', isPhoneVerified: false,
+        otpCode: otp, otpExpiry: expiry,
+      });
+    }
+
+    console.log(`📱 OTP Register [${phone}] : ${otp}  (expire dans 2min)`);
+    res.json({
+      success: true, message: 'Code de vérification envoyé',
+      ...(process.env.NODE_ENV !== 'production' && { debug_otp: otp }),
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// POST /api/auth/login-phone — connexion par numéro + mot de passe (client et livreur)
+router.post('/login-phone', async (req, res) => {
+  try {
+    const { phone, password } = req.body;
+    if (!phone || !password)
+      return res.status(400).json({ success: false, message: 'Numéro et mot de passe requis' });
+    if (!isValidPhone(phone))
+      return res.status(400).json({ success: false, message: PHONE_ERROR });
+
+    const user = await User.findOne({ phone }).select('+password');
+    if (!user || !(await user.comparePassword(password)))
+      return res.status(401).json({ success: false, message: 'Numéro ou mot de passe incorrect' });
+    if (!user.isPhoneVerified)
+      return res.status(403).json({ success: false, message: 'Numéro non vérifié. Utilisez "Mot de passe oublié" pour activer votre compte.' });
+
+    if (user.role === 'driver') {
+      const driverProfile = await Driver.findOne({ user: user._id });
+      if (driverProfile?.approvalStatus === 'en_attente') {
+        return res.status(403).json({
+          success: false, approvalStatus: 'en_attente',
+          message: 'Votre dossier est en cours de vérification par l\'administrateur.',
+        });
+      }
+      if (driverProfile?.approvalStatus === 'rejete') {
+        return res.status(403).json({
+          success: false, approvalStatus: 'rejete',
+          message: `Votre dossier a été refusé.${driverProfile.rejectionReason ? ' Motif : ' + driverProfile.rejectionReason : ''} Contactez l'administrateur.`,
+        });
+      }
+      if (driverProfile?.approvalStatus === 'incomplet') {
+        return res.json({
+          success: true, token: sign(user._id), user, driverProfile,
+          approvalStatus: 'incomplet',
+          missingDocuments: driverProfile.missingDocuments || [],
+          missingInfoNote:  driverProfile.missingInfoNote  || null,
+        });
+      }
+      if (!user.isActive)
+        return res.status(403).json({ success: false, message: 'Compte suspendu. Contactez l\'administrateur.' });
+      return res.json({ success: true, token: sign(user._id), user, driverProfile });
+    }
+
+    if (!user.isActive)
+      return res.status(403).json({ success: false, message: 'Compte suspendu' });
+    res.json({ success: true, token: sign(user._id), user, driverProfile: null });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// POST /api/auth/forgot-password — envoyer OTP pour réinitialisation du mot de passe
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ success: false, message: 'Numéro de téléphone requis' });
+    if (!isValidPhone(phone))
+      return res.status(400).json({ success: false, message: PHONE_ERROR });
+
+    const user = await User.findOne({ phone });
+    if (!user)
+      return res.status(404).json({ success: false, message: 'Numéro introuvable. Vérifiez le numéro saisi.' });
+
+    const otp    = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = new Date(Date.now() + 120 * 1000);
+
+    await User.findByIdAndUpdate(user._id, { otpCode: otp, otpExpiry: expiry });
+    console.log(`📱 OTP Reset [${phone}] : ${otp}  (expire dans 2min)`);
+
+    res.json({
+      success: true, message: 'Code de réinitialisation envoyé',
+      ...(process.env.NODE_ENV !== 'production' && { debug_otp: otp }),
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// POST /api/auth/reset-password — vérifier OTP et définir nouveau mot de passe
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { phone, otp, newPassword } = req.body;
+    if (!phone || !otp || !newPassword)
+      return res.status(400).json({ success: false, message: 'Données manquantes' });
+    if (newPassword.length < 6)
+      return res.status(400).json({ success: false, message: 'Mot de passe trop court (6 caractères minimum)' });
+
+    const user = await User.findOne({ phone }).select('+password');
+    if (!user)
+      return res.status(404).json({ success: false, message: 'Numéro introuvable' });
+    if (!user.otpCode || user.otpCode !== otp)
+      return res.status(400).json({ success: false, message: 'Code OTP incorrect' });
+    if (new Date() > user.otpExpiry)
+      return res.status(400).json({ success: false, message: 'Code OTP expiré (2 minutes)' });
+
+    user.password        = newPassword;
+    user.otpCode         = null;
+    user.otpExpiry       = null;
+    user.isPhoneVerified = true;
+    await user.save();
+
+    res.json({ success: true, message: 'Mot de passe réinitialisé avec succès' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // POST /api/auth/send-otp
 router.post('/send-otp', async (req, res) => {
   try {
@@ -129,9 +281,11 @@ router.post('/send-otp', async (req, res) => {
     const firstName = req.body.firstName || 'Client';
     const lastName  = req.body.lastName  || 'Amder';
     if (!phone) return res.status(400).json({ success: false, message: 'Numéro de téléphone requis' });
+    if (!isValidPhone(phone))
+      return res.status(400).json({ success: false, message: PHONE_ERROR });
 
     const otp    = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 20 * 1000); // 20 secondes
+    const expiry = new Date(Date.now() + 120 * 1000); // 2 minutes
 
     // Atomic upsert — évite le race condition si l'utilisateur appuie deux fois
     await User.findOneAndUpdate(
@@ -144,7 +298,7 @@ router.post('/send-otp', async (req, res) => {
     );
 
     // Production: envoyer SMS via Twilio / Africa's Talking
-    console.log(`📱 OTP [${phone}] : ${otp}  (expire dans 20s)`);
+    console.log(`📱 OTP [${phone}] : ${otp}  (expire dans 2min)`);
 
     res.json({
       success: true,
@@ -154,10 +308,20 @@ router.post('/send-otp', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+const REFERRAL_CREDIT = 500; // MRU offerts au parrain et au filleul
+
+function genReferralCode() {
+  return 'AMD' + Math.random().toString(36).slice(2, 7).toUpperCase();
+}
+
+function genDriverReferralCode() {
+  return 'DRV' + Math.random().toString(36).slice(2, 7).toUpperCase();
+}
+
 // POST /api/auth/verify-otp
 router.post('/verify-otp', async (req, res) => {
   try {
-    const { phone, otp } = req.body;
+    const { phone, otp, referralCode } = req.body;
     if (!phone || !otp) return res.status(400).json({ success: false, message: 'Données manquantes' });
 
     const user = await User.findOne({ phone });
@@ -166,15 +330,50 @@ router.post('/verify-otp', async (req, res) => {
     if (!user.otpCode || user.otpCode !== otp)
       return res.status(400).json({ success: false, message: 'Code incorrect' });
     if (new Date() > user.otpExpiry)
-      return res.status(400).json({ success: false, message: 'Code expiré (20 secondes)' });
+      return res.status(400).json({ success: false, message: 'Code expiré (2 minutes)' });
     if (!user.isActive)
       return res.status(403).json({ success: false, message: 'Compte suspendu' });
 
-    user.otpCode   = null;
-    user.otpExpiry = null;
+    user.otpCode         = null;
+    user.otpExpiry       = null;
+    user.isPhoneVerified = true;
+
+    // Génère un code de parrainage si l'utilisateur n'en a pas encore
+    if (!user.referralCode) {
+      let code, exists;
+      do {
+        code   = genReferralCode();
+        exists = await User.exists({ referralCode: code });
+      } while (exists);
+      user.referralCode = code;
+    }
+
     await user.save();
 
-    res.json({ success: true, token: sign(user._id), user });
+    // Applique le code de parrainage si fourni, pas encore utilisé, et système actif
+    let creditsEarned = 0;
+    if (referralCode && !user.referredBy && await isReferralActive()) {
+      const bonus = await getReferralBonus();
+      const referrer = await User.findOne({
+        referralCode: referralCode.trim().toUpperCase(),
+        _id: { $ne: user._id },
+      });
+      if (referrer) {
+        user.referredBy      = referrer._id;
+        user.referralCredits = (user.referralCredits || 0) + bonus.client;
+        await user.save();
+
+        referrer.referralCredits = (referrer.referralCredits || 0) + bonus.client;
+        referrer.referralCount   = (referrer.referralCount   || 0) + 1;
+        await referrer.save();
+
+        creditsEarned = bonus.client;
+      }
+    }
+
+    // Recharger l'utilisateur mis à jour
+    const freshUser = await User.findById(user._id);
+    res.json({ success: true, token: sign(user._id), user: freshUser, creditsEarned });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -186,16 +385,31 @@ router.post('/register-driver', (req, res, next) => {
   });
 }, async (req, res) => {
   try {
-    const { firstName, lastName, email, phone, password, zone, vehicleType, services } = req.body;
+    const { firstName, lastName, email, phone, password, zone, vehicleType, driverType, services, referralCode, otp } = req.body;
 
     if (!firstName || !lastName || !phone || !password || !zone || !vehicleType)
       return res.status(400).json({ success: false, message: 'Champs obligatoires manquants' });
+    if (!isValidPhone(phone))
+      return res.status(400).json({ success: false, message: PHONE_ERROR });
+    if (!otp)
+      return res.status(400).json({ success: false, message: 'Code OTP requis pour vérifier votre numéro de téléphone' });
+    if (driverType && !['course','livraison'].includes(driverType))
+      return res.status(400).json({ success: false, message: 'Type de service invalide (course ou livraison)' });
     if (password.length < 6)
       return res.status(400).json({ success: false, message: 'Mot de passe trop court (6 caractères minimum)' });
-    if (await User.findOne({ phone }))
-      return res.status(400).json({ success: false, message: 'Ce numéro de téléphone est déjà utilisé' });
     if (email && await User.findOne({ email: email.toLowerCase() }))
       return res.status(400).json({ success: false, message: 'Cet email est déjà utilisé' });
+
+    // Vérifier OTP via l'enregistrement temporaire créé par send-otp
+    const tempUser = await User.findOne({ phone }).select('+password');
+    if (!tempUser)
+      return res.status(400).json({ success: false, message: 'Veuillez d\'abord vérifier votre numéro via OTP' });
+    if (tempUser.password && tempUser.isPhoneVerified)
+      return res.status(400).json({ success: false, message: 'Ce numéro de téléphone est déjà utilisé' });
+    if (!tempUser.otpCode || tempUser.otpCode !== otp)
+      return res.status(400).json({ success: false, message: 'Code OTP incorrect' });
+    if (new Date() > tempUser.otpExpiry)
+      return res.status(400).json({ success: false, message: 'Code OTP expiré (2 minutes). Renvoyez un nouveau code.' });
 
     // Construire les URLs des fichiers uploadés
     const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -204,21 +418,44 @@ router.post('/register-driver', (req, res, next) => {
       return f ? `${baseUrl}/uploads/drivers/${f.filename}` : null;
     };
 
-    const user = await User.create({
-      firstName, lastName, phone,
-      email: email ? email.toLowerCase() : undefined,
-      password,
-      role: 'driver',
-      isActive: false, // inactif jusqu'à validation admin
-    });
+    // Mettre à jour l'utilisateur temporaire en livreur
+    tempUser.firstName       = firstName;
+    tempUser.lastName        = lastName;
+    if (email) tempUser.email = email.toLowerCase();
+    tempUser.password        = password;
+    tempUser.role            = 'driver';
+    tempUser.isActive        = false;
+    tempUser.isPhoneVerified = true;
+    tempUser.otpCode         = null;
+    tempUser.otpExpiry       = null;
+    const user = await tempUser.save();
+
+    // Générer un code de parrainage unique pour ce livreur
+    let drvCode, codeExists;
+    do {
+      drvCode = genDriverReferralCode();
+      codeExists = await Driver.exists({ referralCode: drvCode });
+    } while (codeExists);
+
+    // Vérifier si un code parrain a été fourni et si le système est actif
+    let referrer = null;
+    const referralActive = await isReferralActive();
+    const bonus = await getReferralBonus();
+    if (referralCode?.trim() && referralActive) {
+      referrer = await Driver.findOne({ referralCode: referralCode.trim().toUpperCase() });
+    }
 
     const driver = await Driver.create({
       user:        user._id,
       zone,
       vehicleType: vehicleType || 'moto',
+      driverType:  driverType || null,
       services:    services ? JSON.parse(services) : ['nourriture','courses','colis','pharmacie'],
       status:      'hors_ligne',
       approvalStatus: 'en_attente',
+      referralCode: drvCode,
+      referredBy:   referrer?._id || null,
+      solde:        referrer ? bonus.driver : 0, // bonus nouveau livreur
       documents: {
         photoPersonnelle: fileUrl('photoPersonnelle'),
         photoVehicule:    fileUrl('photoVehicule'),
@@ -227,6 +464,13 @@ router.post('/register-driver', (req, res, next) => {
         assurance:        fileUrl('assurance'),
       },
     });
+
+    // Créditer le parrain
+    if (referrer) {
+      await Driver.findByIdAndUpdate(referrer._id, {
+        $inc: { solde: bonus.driver, referralCount: 1 },
+      });
+    }
 
     // Notifier l'admin via socket
     const io = req.app.get('io');
@@ -245,6 +489,7 @@ router.post('/register-driver', (req, res, next) => {
       token: sign(user._id),
       user,
       driverProfile: driver,
+      creditsEarned: referrer ? REFERRAL_CREDIT : 0,
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

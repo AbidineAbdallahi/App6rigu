@@ -1,5 +1,6 @@
-export const API_URL    = 'http://192.168.100.10:5000/api';
-export const SOCKET_URL = 'http://192.168.100.10:5000';
+export const API_URL    = 'http://192.168.100.86:5000/api';
+export const SOCKET_URL = 'http://192.168.100.86:5000';
+  
 export const COLORS = {
   purple: '#534AB7', purpleLight: '#EEEDFE', purpleDark: '#3C3489',
   green: '#3B6D11',  greenLight: '#EAF3DE',
@@ -17,6 +18,20 @@ export const SERVICE_COLORS = {
   courses:    { bg:'#EAF3DE', text:'#27500A' },
   colis:      { bg:'#E6F1FB', text:'#0C447C' },
   pharmacie:  { bg:'#FBEAF0', text:'#72243E' },
+};
+
+// Numéro WhatsApp de l'admin pour les demandes de recharge (avec indicatif pays, sans +)
+export const WHATSAPP_RECHARGE = '22233863708';
+
+export const DARK_COLORS = {
+  purple: '#534AB7', purpleLight: '#2A2654', purpleDark: '#9A95E8',
+  green: '#3B6D11',  greenLight: '#1A2F08',
+  amber: '#854F0B',  amberLight: '#2A1A04',
+  red: '#A32D2D',    redLight: '#2A0E0E',
+  blue: '#185FA5',   blueLight: '#0A1E38',
+  text: '#F0EFE8',   muted: '#8A8A87',
+  bg: '#161614',     card: '#1E1E1C',
+  border: 'rgba(255,255,255,0.09)',
 };
 
 export const STATUS_LABELS = {

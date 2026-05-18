@@ -4,16 +4,29 @@
     "slug": "amder-client",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "backgroundColor": "#3B328F"
-    },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#3B328F"
       },
-      "package": "mr.amder.client"
+      "package": "mr.amder.client",
+      "config": {
+        "googleMaps": {
+          "apiKey": "REMPLACE_PAR_TA_CLE_GOOGLE_MAPS"
+        }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "mr.amder.client",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Amder a besoin de votre position pour la livraison.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Amder a besoin de votre position pour la livraison."
+      }
     },
     "plugins": [
       [
@@ -21,7 +34,21 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Amder a besoin de votre position pour la livraison."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/adaptive-icon.png",
+          "color": "#3B328F",
+          "defaultChannel": "default"
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1c013254-1246-486a-bbab-915f7bc441c7"
+      }
+    },
+    "owner": "lebatt"
   }
 }

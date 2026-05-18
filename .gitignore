@@ -1,0 +1,50 @@
+# Dépendances
+node_modules/
+.pnp
+.pnp.js
+
+# Fichiers de build
+build/
+dist/
+.next/
+out/
+
+# Environnement
+.env
+.env.local
+.env.*.local
+
+# Fichiers sensibles / secrets
+Livraison/deliver-plus/backend/src/config/*.json
+Livraison/deliver-plus/mobile/android/app/google-services.json
+Livraison/deliver-plus/mobile-client/android/app/google-services.json
+
+# Fichiers uploadés par les utilisateurs
+Livraison/deliver-plus/backend/uploads/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+hs_err_pid*.log
+replay_pid*.log
+
+# Éditeurs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# Expo / React Native généré
+Livraison/deliver-plus/mobile-client/.expo/metro/
+Livraison/deliver-plus/mobile-client/.expo/web/
+Livraison/deliver-plus/mobile-client/android/
+Livraison/deliver-plus/mobile/android/.kotlin/
+
+# Divers
+*.png
+screenshot.png

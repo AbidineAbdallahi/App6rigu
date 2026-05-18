@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../services/api';
+import useLangStore from '../stores/langStore';
+import { translations } from '../i18n';
 
 export default function StatsPage() {
-  const [stats, setStats] = useState([]);
+  const { lang } = useLangStore();
+  const t = translations[lang];
+  const isAr = lang === 'ar';
+
+  const [stats, setStats]   = useState([]);
   const [period, setPeriod] = useState('week');
   const [loading, setLoading] = useState(true);
 
@@ -12,18 +18,27 @@ export default function StatsPage() {
     api.get(`/admin/stats/drivers?period=${period}`).then(r => { setStats(r.data.stats); setLoading(false); });
   }, [period]);
 
+  const deliveriesKey = isAr ? 'التوصيلات' : 'Livraisons';
+  const revenueKey    = isAr ? 'الإيرادات' : 'Revenus';
+
   const chartData = stats.map(s => ({
     name: `${s.user?.firstName} ${s.user?.lastName?.[0]}.`,
-    Livraisons: s.deliveries,
-    Revenus: s.earnings,
+    [deliveriesKey]: s.deliveries,
+    [revenueKey]:    s.earnings,
   }));
+
+  const PERIODS = [
+    ['week', t.stat_week],
+    ['month', t.stat_month],
+    ['year', t.stat_year],
+  ];
 
   return (
     <div>
       <div className="page-header">
-        <h1>Statistiques</h1>
+        <h1>{t.stat_title}</h1>
         <div style={{ display:'flex', gap:6 }}>
-          {[['week','7 jours'],['month','Ce mois'],['year','Cette année']].map(([v,l]) => (
+          {PERIODS.map(([v, l]) => (
             <button key={v} className={`btn-sm ${period===v?'btn-primary':''}`} onClick={() => setPeriod(v)}>{l}</button>
           ))}
         </div>
@@ -33,15 +48,15 @@ export default function StatsPage() {
         <>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:20 }}>
             <div className="metric-card">
-              <p className="mlabel">Total livraisons</p>
+              <p className="mlabel">{t.stat_total_deliveries}</p>
               <p className="mvalue">{stats.reduce((s,d)=>s+d.deliveries,0)}</p>
             </div>
             <div className="metric-card">
-              <p className="mlabel">Revenus totaux (MRU)</p>
+              <p className="mlabel">{t.stat_total_revenue}</p>
               <p className="mvalue" style={{ color:'#3B6D11' }}>{stats.reduce((s,d)=>s+d.earnings,0).toLocaleString()}</p>
             </div>
             <div className="metric-card">
-              <p className="mlabel">Note moyenne</p>
+              <p className="mlabel">{t.stat_avg_rating}</p>
               <p className="mvalue" style={{ color:'#854F0B' }}>
                 {stats.length ? (stats.reduce((s,d)=>s+(d.avgRating||0),0)/stats.length).toFixed(1) : '—'} ★
               </p>
@@ -50,26 +65,26 @@ export default function StatsPage() {
 
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:20 }}>
             <div className="card">
-              <p style={{ fontSize:13, fontWeight:500, marginBottom:14 }}>Livraisons par livreur</p>
+              <p style={{ fontSize:13, fontWeight:500, marginBottom:14 }}>{t.stat_deliveries_chart}</p>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                   <XAxis dataKey="name" tick={{ fontSize:11 }} />
                   <YAxis tick={{ fontSize:11 }} />
                   <Tooltip />
-                  <Bar dataKey="Livraisons" fill="#534AB7" radius={[4,4,0,0]} />
+                  <Bar dataKey={deliveriesKey} fill="#534AB7" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
             <div className="card">
-              <p style={{ fontSize:13, fontWeight:500, marginBottom:14 }}>Revenus par livreur (MRU)</p>
+              <p style={{ fontSize:13, fontWeight:500, marginBottom:14 }}>{t.stat_revenue_chart}</p>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                   <XAxis dataKey="name" tick={{ fontSize:11 }} />
                   <YAxis tick={{ fontSize:11 }} />
                   <Tooltip />
-                  <Bar dataKey="Revenus" fill="#3B6D11" radius={[4,4,0,0]} />
+                  <Bar dataKey={revenueKey} fill="#3B6D11" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -78,7 +93,10 @@ export default function StatsPage() {
           <div className="card" style={{ padding:0, overflow:'hidden' }}>
             <table>
               <thead>
-                <tr><th>Livreur</th><th>Zone</th><th>Livraisons</th><th>Revenus (MRU)</th><th>Note moy.</th><th>Taux succès</th></tr>
+                <tr>
+                  <th>{t.th_driver}</th><th>{t.th_zone}</th><th>{t.th_deliveries}</th>
+                  <th>{t.th_revenue}</th><th>{t.th_avg_rating}</th><th>{t.th_success_rate}</th>
+                </tr>
               </thead>
               <tbody>
                 {stats.map((s, i) => (
@@ -100,7 +118,7 @@ export default function StatsPage() {
                 ))}
               </tbody>
             </table>
-            {stats.length === 0 && <p style={{ textAlign:'center', padding:24, color:'#6b6b67' }}>Aucune donnée pour cette période</p>}
+            {stats.length === 0 && <p style={{ textAlign:'center', padding:24, color:'#6b6b67' }}>{t.stat_no_data}</p>}
           </div>
         </>
       )}

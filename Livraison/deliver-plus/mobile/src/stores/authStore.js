@@ -39,10 +39,10 @@ const useAuthStore = create((set, get) => ({
     set({ initialized: true });
   },
 
-  login: async (email, password) => {
+  login: async (phone, password) => {
     set({ loading: true, error: null, approvalStatus: null });
     try {
-      const { data } = await axios.post(`${API_URL}/auth/login`, { email, password });
+      const { data } = await axios.post(`${API_URL}/auth/login-phone`, { phone, password });
       await AsyncStorage.setItem('token', data.token);
       set({
         token: data.token, user: data.user, driverProfile: data.driverProfile, loading: false,
@@ -52,12 +52,43 @@ const useAuthStore = create((set, get) => ({
       });
       return data.approvalStatus === 'incomplet' ? 'incomplet' : data.user.role;
     } catch (err) {
-      const resp = err.response?.data;
+      const resp   = err.response?.data;
+      const status = err.response?.status;
+      let errorCode;
+      if (status === 401)       errorCode = 'login_err_invalid';
+      else if (status === 403)  errorCode = 'login_err_suspended';
+      else                      errorCode = 'login_err_network';
       set({
-        error: resp?.message || 'Erreur de connexion',
+        error: errorCode,
         approvalStatus: resp?.approvalStatus || null,
         loading: false,
       });
+      return null;
+    }
+  },
+
+  forgotPassword: async (phone) => {
+    set({ loading: true, error: null });
+    try {
+      const { data } = await axios.post(`${API_URL}/auth/forgot-password`, { phone });
+      set({ loading: false });
+      return data;
+    } catch (err) {
+      const status = err.response?.status;
+      const message = err.response?.data?.message || 'Erreur serveur';
+      set({ error: message, loading: false });
+      return { success: false, notFound: status === 404 };
+    }
+  },
+
+  resetPassword: async (phone, otp, newPassword) => {
+    set({ loading: true, error: null });
+    try {
+      const { data } = await axios.post(`${API_URL}/auth/reset-password`, { phone, otp, newPassword });
+      set({ loading: false });
+      return data;
+    } catch (err) {
+      set({ error: err.response?.data?.message || 'Code incorrect ou expiré', loading: false });
       return null;
     }
   },
@@ -99,6 +130,10 @@ const useAuthStore = create((set, get) => ({
       return false;
     }
   },
+
+  updateDriver: (patch) => set(s => ({
+    driverProfile: s.driverProfile ? { ...s.driverProfile, ...patch } : s.driverProfile,
+  })),
 
   logout: async () => {
     await AsyncStorage.removeItem('token');

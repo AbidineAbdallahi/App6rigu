@@ -1,13 +1,25 @@
-import { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Image, Alert } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Image, Alert, Platform, Linking } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { API_URL, COLORS } from './src/constants';
 import useAuthStore from './src/stores/authStore';
+import useLangStore from './src/stores/langStore';
+import { translations } from './src/i18n';
+import { registerForPushNotifications } from './src/services/notifications';
+import notifee from '@notifee/react-native';
 import DriverTabs from './src/navigation/DriverTabs';
 import DriverRegisterScreen from './src/screens/auth/DriverRegisterScreen';
+
+// Validation numéro mauritanien : 8 chiffres, commence par 2, 3 ou 4
+const isValidPhone = (phone) => {
+  const digits = phone.replace(/[\s\-\.]/g, '').replace(/^\+?222/, '');
+  return /^[234]\d{7}$/.test(digits);
+};
+const PHONE_ERR = 'Numéro invalide. Doit contenir 8 chiffres et commencer par 2, 3 ou 4.';
 
 // ─── Logo Amder ───────────────────────────────────────────────────────────────
 function AmderLogo({ size = 90 }) {
@@ -29,6 +41,8 @@ function AmderLogo({ size = 90 }) {
 
 // ─── Écran dossier en attente ─────────────────────────────────────────────────
 function PendingScreen({ onBack }) {
+  const { lang } = useLangStore();
+  const t = translations[lang] || translations.fr;
   return (
     <SafeAreaView style={st.safe}>
       <ScrollView contentContainerStyle={st.center}>
@@ -36,21 +50,20 @@ function PendingScreen({ onBack }) {
         <View style={{ marginTop:28, alignItems:'center', padding:24 }}>
           <Text style={{ fontSize:48, marginBottom:16 }}>⏳</Text>
           <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', textAlign:'center', marginBottom:10 }}>
-            Dossier en cours de vérification
+            {t.pending_title}
           </Text>
           <Text style={{ fontSize:14, color:'#6b6b67', textAlign:'center', lineHeight:22, marginBottom:28 }}>
-            Votre dossier a bien été reçu. Notre équipe va vérifier vos documents et informations.{'\n\n'}
-            Vous recevrez une notification dès que votre compte sera activé.
+            {t.pending_msg}
           </Text>
           <View style={{ backgroundColor:'#FFF8E7', borderRadius:14, padding:16, borderWidth:1, borderColor:'#F59E0B', width:'100%', marginBottom:24 }}>
-            <Text style={{ fontSize:13, color:'#92400E', fontWeight:'600', marginBottom:4 }}>Documents soumis :</Text>
-            {['Photo personnelle','Photo véhicule','Carte grise','Carte d\'identité','Assurance'].map(d => (
+            <Text style={{ fontSize:13, color:'#92400E', fontWeight:'600', marginBottom:4 }}>{t.pending_docs_title}</Text>
+            {[t.reg_doc_photo, t.reg_doc_vehicle, t.reg_doc_grise, t.reg_doc_id, t.reg_doc_insurance].map(d => (
               <Text key={d} style={{ fontSize:13, color:'#92400E', marginTop:4 }}>· {d}</Text>
             ))}
           </View>
           <TouchableOpacity onPress={onBack}
             style={{ backgroundColor:'#F7F6F2', borderRadius:12, padding:14, width:'100%', alignItems:'center', borderWidth:.5, borderColor:'#D3D1C7' }}>
-            <Text style={{ fontSize:14, fontWeight:'600', color:'#6b6b67' }}>← Retour à la connexion</Text>
+            <Text style={{ fontSize:14, fontWeight:'600', color:'#6b6b67' }}>{t.pending_back}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -59,52 +72,56 @@ function PendingScreen({ onBack }) {
 }
 
 // ─── Écran compléter le dossier ──────────────────────────────────────────────
-const DOCS_META = [
-  { key:'photoPersonnelle', label:'Photo personnelle',  icon:'🤳' },
-  { key:'photoVehicule',    label:'Photo du véhicule',  icon:'📸' },
-  { key:'carteGrise',       label:'Carte grise',        icon:'📄' },
-  { key:'carteIdentite',    label:"Carte d'identité",   icon:'🪪' },
-  { key:'assurance',        label:'Assurance',          icon:'🛡️' },
+const DOCS_KEYS = [
+  { key:'photoPersonnelle', tKey:'reg_doc_photo',   icon:'🤳' },
+  { key:'photoVehicule',    tKey:'reg_doc_vehicle', icon:'📸' },
+  { key:'carteGrise',       tKey:'reg_doc_grise',   icon:'📄' },
+  { key:'carteIdentite',    tKey:'reg_doc_id',      icon:'🪪' },
+  { key:'assurance',        tKey:'reg_doc_insurance', icon:'🛡️' },
 ];
 
 function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, onLogout }) {
   const { token } = useAuthStore();
+  const { lang } = useLangStore();
+  const t = translations[lang] || translations.fr;
   const [photos, setPhotos]     = useState({});
   const [loading, setLoading]   = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  const DOCS_META = DOCS_KEYS.map(d => ({ ...d, label: t[d.tKey] || d.tKey }));
+
   const pickImage = (key) => {
-    Alert.alert(DOCS_META.find(d => d.key === key)?.label || 'Document', 'Choisir depuis...', [
+    Alert.alert(DOCS_META.find(d => d.key === key)?.label || 'Document', t.pick_source, [
       {
-        text: '📷 Appareil photo',
+        text: t.pick_camera,
         onPress: async () => {
           try {
             const cam = await ImagePicker.requestCameraPermissionsAsync();
-            if (!cam.granted) { Alert.alert('Permission refusée', 'Autorisez l\'accès à l\'appareil photo dans les paramètres.'); return; }
+            if (!cam.granted) { Alert.alert(t.reg_perm_denied, t.perm_denied_cam); return; }
             const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7, allowsEditing: true });
             if (!r.canceled) setPhotos(p => ({ ...p, [key]: r.assets[0] }));
-          } catch (e) { Alert.alert('Erreur', e.message); }
+          } catch (e) { Alert.alert(t.error, e.message); }
         },
       },
       {
-        text: '🖼️ Galerie',
+        text: t.pick_gallery,
         onPress: async () => {
           try {
             const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (!perm.granted) { Alert.alert('Permission refusée', 'Autorisez l\'accès à la galerie dans les paramètres.'); return; }
+            if (!perm.granted) { Alert.alert(t.reg_perm_denied, t.perm_denied_gallery); return; }
             const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, allowsEditing: true });
             if (!r.canceled) setPhotos(p => ({ ...p, [key]: r.assets[0] }));
-          } catch (e) { Alert.alert('Erreur', e.message); }
+          } catch (e) { Alert.alert(t.error, e.message); }
         },
       },
-      { text: 'Annuler', style: 'cancel' },
+      { text: t.pick_cancel, style: 'cancel' },
     ]);
   };
 
   const submit = async () => {
     const allUploaded = missingDocuments.every(k => photos[k]);
     if (!allUploaded) {
-      Alert.alert('Documents manquants', 'Veuillez ajouter tous les documents demandés.');
+      Alert.alert(t.complete_missing_alert, t.complete_missing_msg);
       return;
     }
     setLoading(true);
@@ -124,10 +141,10 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
       });
       let data = {};
       try { data = await res.json(); } catch {}
-      if (!res.ok) { Alert.alert('Erreur', data?.message || `Erreur serveur (${res.status})`); return; }
+      if (!res.ok) { Alert.alert(t.error, data?.message || `${t.complete_server_err} (${res.status})`); return; }
       setSubmitted(true);
     } catch {
-      Alert.alert('Erreur réseau', 'Impossible de joindre le serveur.');
+      Alert.alert(t.complete_net_err, t.complete_server_err);
     } finally { setLoading(false); }
   };
 
@@ -138,13 +155,13 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
           <AmderLogo size={80} />
           <View style={{ marginTop:28, alignItems:'center', padding:24 }}>
             <Text style={{ fontSize:48, marginBottom:16 }}>✅</Text>
-            <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', textAlign:'center', marginBottom:10 }}>Dossier mis à jour !</Text>
+            <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', textAlign:'center', marginBottom:10 }}>{t.complete_done_title}</Text>
             <Text style={{ fontSize:14, color:'#6b6b67', textAlign:'center', lineHeight:22, marginBottom:24 }}>
-              Vos documents ont été envoyés à l'administrateur. Vous serez notifié dès validation.
+              {t.complete_done_msg}
             </Text>
             <TouchableOpacity onPress={onLogout}
               style={{ backgroundColor:'#F7F6F2', borderRadius:12, padding:14, width:'100%', alignItems:'center', borderWidth:.5, borderColor:'#D3D1C7' }}>
-              <Text style={{ fontSize:14, fontWeight:'600', color:'#6b6b67' }}>← Retour à la connexion</Text>
+              <Text style={{ fontSize:14, fontWeight:'600', color:'#6b6b67' }}>{t.complete_back}</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -159,10 +176,10 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
       <ScrollView contentContainerStyle={[st.center, { paddingTop:16 }]}>
         <AmderLogo size={70} />
         <View style={{ marginTop:20, width:'100%', padding:24 }}>
-          <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', marginBottom:8 }}>Compléter votre dossier</Text>
+          <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', marginBottom:8 }}>{t.complete_title}</Text>
 
           <View style={{ backgroundColor:'#E6F1FB', borderRadius:12, padding:14, marginBottom:20, borderWidth:1, borderColor:'#9BC4EC' }}>
-            <Text style={{ fontSize:13, color:'#185FA5', fontWeight:'700', marginBottom:4 }}>Documents demandés par l'administrateur :</Text>
+            <Text style={{ fontSize:13, color:'#185FA5', fontWeight:'700', marginBottom:4 }}>{t.complete_docs_title}</Text>
             {requestedDocs.map(d => (
               <Text key={d.key} style={{ fontSize:13, color:'#185FA5', marginTop:3 }}>{d.icon} {d.label}</Text>
             ))}
@@ -178,7 +195,7 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
                 <View style={{ flex:1 }}>
                   <Text style={{ fontSize:13, fontWeight:'600', color:'#1a1a18' }}>{doc.label}</Text>
                   <Text style={{ fontSize:11, color: photos[doc.key] ? '#3B6D11' : '#A32D2D', marginTop:2 }}>
-                    {photos[doc.key] ? '✅ Ajouté' : '⚠️ Requis'}
+                    {photos[doc.key] ? t.complete_added : t.complete_required}
                   </Text>
                 </View>
               </View>
@@ -187,23 +204,23 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
                   <Image source={{ uri: photos[doc.key].uri }} style={{ width:'100%', height:100, borderRadius:8, resizeMode:'cover' }} />
                   <TouchableOpacity onPress={() => pickImage(doc.key)}
                     style={{ borderWidth:1, borderColor:COLORS.purple, borderRadius:8, paddingHorizontal:14, paddingVertical:6 }}>
-                    <Text style={{ color:COLORS.purple, fontSize:12, fontWeight:'600' }}>Changer</Text>
+                    <Text style={{ color:COLORS.purple, fontSize:12, fontWeight:'600' }}>{t.complete_change}</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
                 <TouchableOpacity onPress={() => pickImage(doc.key)}
                   style={{ borderWidth:1.5, borderColor:COLORS.purple, borderRadius:10, padding:12, alignItems:'center', borderStyle:'dashed' }}>
-                  <Text style={{ color:COLORS.purple, fontWeight:'600', fontSize:13 }}>📁 Ajouter</Text>
+                  <Text style={{ color:COLORS.purple, fontWeight:'600', fontSize:13 }}>{t.complete_add}</Text>
                 </TouchableOpacity>
               )}
             </View>
           ))}
 
           <TouchableOpacity style={[st.btn, { marginTop:12 }, loading && { opacity:.6 }]} onPress={submit} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnTxt}>✅ Envoyer les documents</Text>}
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnTxt}>{t.complete_send_btn}</Text>}
           </TouchableOpacity>
           <TouchableOpacity onPress={onLogout} style={{ marginTop:14, alignItems:'center' }}>
-            <Text style={{ fontSize:13, color:COLORS.muted }}>Se déconnecter</Text>
+            <Text style={{ fontSize:13, color:COLORS.muted }}>{t.complete_logout}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -213,6 +230,8 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
 
 // ─── Écran dossier refusé ─────────────────────────────────────────────────────
 function RejectedScreen({ message, onBack }) {
+  const { lang } = useLangStore();
+  const t = translations[lang] || translations.fr;
   return (
     <SafeAreaView style={st.safe}>
       <ScrollView contentContainerStyle={st.center}>
@@ -220,21 +239,228 @@ function RejectedScreen({ message, onBack }) {
         <View style={{ marginTop:28, alignItems:'center', padding:24 }}>
           <Text style={{ fontSize:48, marginBottom:16 }}>❌</Text>
           <Text style={{ fontSize:20, fontWeight:'800', color:'#A32D2D', textAlign:'center', marginBottom:10 }}>
-            Dossier refusé
+            {t.rejected_title}
           </Text>
           <Text style={{ fontSize:14, color:'#6b6b67', textAlign:'center', lineHeight:22, marginBottom:20 }}>
-            {message || 'Votre dossier a été refusé par l\'administrateur.'}
+            {message || t.rejected_default_msg}
           </Text>
           <View style={{ backgroundColor:'#FDF0F0', borderRadius:14, padding:16, borderWidth:1, borderColor:'#F5C0C0', width:'100%', marginBottom:24 }}>
             <Text style={{ fontSize:13, color:'#A32D2D', lineHeight:20 }}>
-              Pour toute question, contactez notre support ou soumettez un nouveau dossier avec des documents valides.
+              {t.rejected_info}
             </Text>
           </View>
           <TouchableOpacity onPress={onBack}
             style={{ backgroundColor:'#F7F6F2', borderRadius:12, padding:14, width:'100%', alignItems:'center', borderWidth:.5, borderColor:'#D3D1C7' }}>
-            <Text style={{ fontSize:14, fontWeight:'600', color:'#6b6b67' }}>← Retour à la connexion</Text>
+            <Text style={{ fontSize:14, fontWeight:'600', color:'#6b6b67' }}>{t.rejected_back}</Text>
           </TouchableOpacity>
         </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ─── Écran mot de passe oublié (livreur) ─────────────────────────────────────
+function ForgotPasswordScreen({ onBack }) {
+  const { forgotPassword, resetPassword, loading, error, clearError } = useAuthStore();
+  const { lang } = useLangStore();
+  const t = translations[lang] || translations.fr;
+  const isAr = lang === 'ar';
+  const rtl = isAr ? { textAlign: 'right' } : {};
+
+  // step: 'phone' | 'otp' | 'new-pwd' | 'done' | 'not-found'
+  const [step, setStep]           = useState('phone');
+  const [phone, setPhone]         = useState('');
+  const [otp, setOtp]             = useState('');
+  const [debugOtp, setDebugOtp]   = useState('');
+  const [newPwd, setNewPwd]       = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [timeLeft, setTimeLeft]   = useState(120);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    if (step !== 'otp') return;
+    setTimeLeft(120);
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) { clearInterval(timerRef.current); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [step]);
+
+  const sendOtp = async () => {
+    if (!phone.trim()) return;
+    if (!isValidPhone(phone.trim())) {
+      Alert.alert(t.val_phone_invalid, t.val_phone_err);
+      return;
+    }
+    const result = await forgotPassword(phone.trim());
+    if (result?.success) {
+      if (result.debug_otp) setDebugOtp(result.debug_otp);
+      setOtp('');
+      setStep('otp');
+    } else if (result?.notFound) {
+      setStep('not-found');
+    }
+  };
+
+  const verifyOtp = () => {
+    if (otp.length < 6) return;
+    setStep('new-pwd');
+  };
+
+  const doReset = async () => {
+    if (!newPwd || newPwd.length < 6) {
+      Alert.alert(t.val_verify, t.val_pwd_min);
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      Alert.alert(t.val_verify, t.val_pwd_mismatch);
+      return;
+    }
+    const result = await resetPassword(phone.trim(), otp.trim(), newPwd);
+    if (result?.success) setStep('done');
+  };
+
+  const timerColor = timeLeft === 0 ? COLORS.red : timeLeft <= 15 ? COLORS.amber : COLORS.green;
+
+  if (step === 'done') {
+    return (
+      <SafeAreaView style={st.safe}>
+        <ScrollView contentContainerStyle={st.center}>
+          <AmderLogo size={80} />
+          <View style={{ marginTop: 28, alignItems: 'center', padding: 24 }}>
+            <Text style={{ fontSize: 56, marginBottom: 16 }}>✅</Text>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#1a1a18', textAlign: 'center', marginBottom: 10 }}>
+              {t.forgot_done_title}
+            </Text>
+            <Text style={{ fontSize: 14, color: '#6b6b67', textAlign: 'center', lineHeight: 22, marginBottom: 24 }}>
+              {t.forgot_done_msg}
+            </Text>
+            <TouchableOpacity onPress={() => { clearError(); onBack(); }}
+              style={[st.btn, { width: '100%' }]}>
+              <Text style={st.btnTxt}>{t.forgot_back_login}</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (step === 'not-found') {
+    return (
+      <SafeAreaView style={st.safe}>
+        <ScrollView contentContainerStyle={st.center}>
+          <AmderLogo size={80} />
+          <View style={{ marginTop: 28, alignItems: 'center', padding: 24 }}>
+            <Text style={{ fontSize: 52, marginBottom: 16 }}>🔍</Text>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#1a1a18', textAlign: 'center', marginBottom: 10 }}>
+              {t.forgot_not_found_title}
+            </Text>
+            <Text style={{ fontSize: 14, color: '#6b6b67', textAlign: 'center', lineHeight: 22, marginBottom: 20 }}>
+              {t.forgot_sub_otp} <Text style={{ fontWeight: '700', color: '#1a1a18' }}>{phone}</Text>{'\n'}
+              {t.forgot_not_found_msg}
+            </Text>
+            <TouchableOpacity onPress={() => { clearError(); onBack(); }}
+              style={[st.btn, { width: '100%', marginBottom: 12 }]}>
+              <Text style={st.btnTxt}>{t.forgot_create_account}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { clearError(); setPhone(''); setStep('phone'); }}
+              style={{ alignItems: 'center' }}>
+              <Text style={{ fontSize: 13, color: COLORS.muted }}>{t.forgot_try_other}</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={st.safe}>
+      <ScrollView contentContainerStyle={[st.center, { paddingTop: 16 }]}>
+        <AmderLogo size={70} />
+        <Text style={{ fontSize: 22, fontWeight: '800', color: COLORS.text, marginTop: 16, marginBottom: 4 }}>
+          {t.forgot_title}
+        </Text>
+        <Text style={{ fontSize: 13, color: COLORS.muted, marginBottom: 24, textAlign: 'center' }}>
+          {step === 'phone' ? t.forgot_sub_phone
+           : step === 'otp'  ? `${t.forgot_sub_otp} ${phone}`
+           : t.forgot_sub_pwd}
+        </Text>
+
+        <View style={[st.card, { width: '100%' }]}>
+          {!!error && <View style={st.errBox}><Text style={st.errTxt}>{error}</Text></View>}
+
+          {step === 'phone' && (
+            <>
+              <Text style={[st.lbl, rtl]}>{t.forgot_phone_lbl}</Text>
+              <TextInput style={[st.inp, isAr && { textAlign: 'right' }]}
+                value={phone}
+                onChangeText={v => setPhone(v.replace(/[^0-9]/g, '').slice(0, 8))}
+                placeholder="ex: 36123456" keyboardType="number-pad" maxLength={8} autoFocus />
+              <TouchableOpacity style={[st.btn, !phone.trim() && { opacity: 0.5 }]}
+                onPress={sendOtp} disabled={loading || !phone.trim()}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnTxt}>{t.forgot_send_btn}</Text>}
+              </TouchableOpacity>
+            </>
+          )}
+
+          {step === 'otp' && (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <TextInput
+                  style={{ flex: 1, borderWidth: 2, borderColor: COLORS.purple, borderRadius: 12, padding: 16, fontSize: 26, textAlign: 'center', backgroundColor: COLORS.bg, letterSpacing: 10, fontWeight: '700', color: COLORS.text }}
+                  value={otp}
+                  onChangeText={v => setOtp(v.replace(/[^0-9]/g, '').slice(0, 6))}
+                  placeholder="• • • • • •" keyboardType="number-pad" maxLength={6} autoFocus
+                />
+                <View style={{ width: 56, height: 56, borderRadius: 28, borderWidth: 3, borderColor: timerColor, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: timerColor }}>{timeLeft === 0 ? '✕' : timeLeft}</Text>
+                  {timeLeft > 0 && <Text style={{ fontSize: 8, color: COLORS.muted }}>{t.forgot_sec}</Text>}
+                </View>
+              </View>
+              {!!debugOtp && (
+                <View style={{ backgroundColor: '#F0F0F0', borderRadius: 8, padding: 10, marginBottom: 14 }}>
+                  <Text style={{ fontSize: 12, color: COLORS.muted, textAlign: 'center' }}>{t.forgot_test_code} {debugOtp}</Text>
+                </View>
+              )}
+              {timeLeft === 0 ? (
+                <TouchableOpacity style={[st.btn, { borderWidth: 1.5, borderColor: COLORS.purple, backgroundColor: 'transparent' }]}
+                  onPress={sendOtp} disabled={loading}>
+                  {loading ? <ActivityIndicator color={COLORS.purple} /> : <Text style={{ color: COLORS.purple, fontWeight: '700', fontSize: 15 }}>{t.forgot_resend}</Text>}
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={[st.btn, otp.length < 6 && { opacity: 0.5 }]}
+                  onPress={verifyOtp} disabled={otp.length < 6}>
+                  <Text style={st.btnTxt}>{otp.length === 6 ? t.forgot_continue_btn : `${6 - otp.length} ${t.forgot_digits_left}`}</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
+          {step === 'new-pwd' && (
+            <>
+              <Text style={[st.lbl, rtl]}>{t.forgot_new_pwd_lbl}</Text>
+              <TextInput style={[st.inp, isAr && { textAlign: 'right' }]}
+                value={newPwd} onChangeText={setNewPwd}
+                placeholder={t.forgot_new_pwd_ph} secureTextEntry autoFocus />
+              <Text style={[st.lbl, rtl]}>{t.forgot_confirm_lbl}</Text>
+              <TextInput style={[st.inp, isAr && { textAlign: 'right' }]}
+                value={confirmPwd} onChangeText={setConfirmPwd}
+                placeholder={t.forgot_confirm_ph} secureTextEntry />
+              <TouchableOpacity style={[st.btn, (!newPwd || !confirmPwd) && { opacity: 0.5 }]}
+                onPress={doReset} disabled={loading || !newPwd || !confirmPwd}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnTxt}>{t.forgot_reset_btn}</Text>}
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
+        <TouchableOpacity onPress={onBack} style={{ marginTop: 20, alignItems: 'center' }}>
+          <Text style={{ fontSize: 13, color: COLORS.muted }}>{t.forgot_back}</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -243,13 +469,28 @@ function RejectedScreen({ message, onBack }) {
 // ─── Connexion Livreur ────────────────────────────────────────────────────────
 function DriverLoginScreen({ onRegister }) {
   const { login, loading, error, approvalStatus, missingDocuments, missingInfoNote, clearError, logout } = useAuthStore();
-  const [email, setEmail]       = useState('');
+  const { lang, setLang } = useLangStore();
+  const t = translations[lang] || translations.fr;
+  const isAr = lang === 'ar';
+  const rtl = isAr ? { textAlign: 'right' } : {};
+
+  const [phone, setPhone]       = useState('');
   const [password, setPassword] = useState('');
+  const [showPwd, setShowPwd]   = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   const submit = async () => {
-    const role = await login(email.trim().toLowerCase(), password);
+    if (!isValidPhone(phone.trim())) {
+      Alert.alert(t.val_phone_invalid, t.val_phone_err);
+      return;
+    }
+    const role = await login(phone.trim(), password);
     if (role && role !== 'driver' && role !== 'incomplet') useAuthStore.getState().logout();
   };
+
+  if (showForgot) {
+    return <ForgotPasswordScreen onBack={() => { clearError(); setShowForgot(false); }} />;
+  }
 
   if (approvalStatus === 'en_attente') {
     return <PendingScreen onBack={clearError} />;
@@ -273,27 +514,54 @@ function DriverLoginScreen({ onRegister }) {
   return (
     <SafeAreaView style={st.safe}>
       <ScrollView contentContainerStyle={st.center}>
+        {/* Toggle langue */}
+        <View style={st.langRow}>
+          {['fr', 'ar'].map(l => (
+            <TouchableOpacity key={l} onPress={() => setLang(l)}
+              style={[st.langBtn, lang === l && st.langBtnActive]}>
+              <Text style={[st.langTxt, lang === l && st.langTxtActive]}>
+                {l === 'fr' ? 'Français' : 'عربي'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <AmderLogo size={100} />
         <Text style={st.title}>Amder</Text>
-        <Text style={st.sub}>Espace Livreur</Text>
+        <Text style={st.sub}>{t.login_space}</Text>
         <View style={st.card}>
-          {!!error && <View style={st.errBox}><Text style={st.errTxt}>{error}</Text></View>}
-          <Text style={st.lbl}>Email</Text>
-          <TextInput style={st.inp} value={email} onChangeText={setEmail}
-            autoCapitalize="none" keyboardType="email-address" placeholder="livreur@amder.mr" />
-          <Text style={st.lbl}>Mot de passe</Text>
-          <TextInput style={st.inp} value={password} onChangeText={setPassword}
-            secureTextEntry placeholder="••••••••" />
+          {!!error && <View style={st.errBox}><Text style={[st.errTxt, rtl]}>{t[error] || error}</Text></View>}
+          <Text style={[st.lbl, rtl]}>{t.login_phone || 'Numéro de téléphone'}</Text>
+          <TextInput style={[st.inp, isAr && { textAlign: 'right' }]}
+            value={phone}
+            onChangeText={v => setPhone(v.replace(/[^0-9]/g, '').slice(0, 8))}
+            keyboardType="number-pad" maxLength={8} placeholder="ex: 36123456" />
+          <Text style={[st.lbl, rtl]}>{t.login_password}</Text>
+          <View style={[st.inp, { flexDirection: 'row', alignItems: 'center', paddingVertical: 0, paddingHorizontal: 0 }]}>
+            <TextInput
+              style={[{ flex: 1, fontSize: 14, color: COLORS.text, padding: 12 }, isAr && { textAlign: 'right' }]}
+              value={password} onChangeText={setPassword}
+              secureTextEntry={!showPwd} placeholder="••••••••"
+            />
+            <TouchableOpacity onPress={() => setShowPwd(v => !v)} style={{ paddingHorizontal: 12 }}>
+              <Ionicons name={showPwd ? 'eye-off' : 'eye'} size={20} color={COLORS.muted} />
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity style={st.btn} onPress={submit} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnTxt}>Se connecter</Text>}
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={st.btnTxt}>{t.login_btn}</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { clearError(); setShowForgot(true); }}
+            style={{ alignItems: 'center', marginTop: 14 }}>
+            <Text style={{ color: COLORS.purple, fontSize: 13 }}>
+              {t.login_forgot || 'Mot de passe oublié ?'}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Lien vers l'inscription */}
         <TouchableOpacity onPress={onRegister} style={st.registerLink}>
-          <Text style={st.registerTxt}>
-            Pas encore livreur ?{' '}
-            <Text style={{ color: COLORS.purple, fontWeight:'700' }}>Créer mon compte</Text>
+          <Text style={[st.registerTxt, rtl]}>
+            {t.login_not_driver}{' '}
+            <Text style={{ color: COLORS.purple, fontWeight:'700' }}>{t.login_create_account}</Text>
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -306,7 +574,21 @@ export default function App() {
   const { token, initialized, init, approvalStatus, missingDocuments, missingInfoNote, logout } = useAuthStore();
   const [showRegister, setShowRegister] = useState(false);
 
-  useEffect(() => { init(); }, []);
+  useEffect(() => {
+    init();
+    useLangStore.getState().initLang();
+    require('./src/stores/themeStore').default.getState().initTheme();
+  }, []);
+
+  useEffect(() => {
+    if (token) {
+      registerForPushNotifications();
+      // Android 14+ : demander USE_FULL_SCREEN_INTENT pour les notifications plein écran (style appel)
+      if (Platform.OS === 'android') {
+        notifee.requestPermission().catch(() => {});
+      }
+    }
+  }, [token]);
 
   if (!initialized) {
     return (
@@ -370,4 +652,9 @@ const st = StyleSheet.create({
   errTxt:       { color: COLORS.red, fontSize:13 },
   registerLink: { marginTop:20, alignItems:'center' },
   registerTxt:  { fontSize:14, color: COLORS.muted },
+  langRow:      { flexDirection:'row', gap:8, marginBottom:24, alignSelf:'center' },
+  langBtn:      { paddingHorizontal:16, paddingVertical:6, borderRadius:20, backgroundColor:'#EEEDFE' },
+  langBtnActive:{ backgroundColor: COLORS.purple },
+  langTxt:      { fontSize:13, color: COLORS.purple, fontWeight:'500' },
+  langTxtActive:{ color:'#fff', fontWeight:'700' },
 });

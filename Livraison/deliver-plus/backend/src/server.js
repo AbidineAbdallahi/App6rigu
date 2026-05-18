@@ -6,12 +6,15 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
-const authRoutes   = require('./routes/auth');
-const userRoutes   = require('./routes/users');
-const driverRoutes = require('./routes/drivers');
-const orderRoutes  = require('./routes/orders');
-const adminRoutes  = require('./routes/admin');
-const tarifRoutes  = require('./routes/tarifs');
+const authRoutes     = require('./routes/auth');
+const userRoutes     = require('./routes/users');
+const driverRoutes   = require('./routes/drivers');
+const orderRoutes    = require('./routes/orders');
+const adminRoutes    = require('./routes/admin');
+const tarifRoutes    = require('./routes/tarifs');
+const paymentRoutes  = require('./routes/payments');
+const messageRoutes  = require('./routes/messages');
+const Settings       = require('./models/Settings');
 const { verifyToken } = require('./middleware/auth');
 const socketHandler = require('./sockets/trackingSocket');
 
@@ -31,14 +34,55 @@ app.use('/api/users',   verifyToken, userRoutes);
 app.use('/api/drivers', verifyToken, driverRoutes);
 app.use('/api/orders',  verifyToken, orderRoutes);
 app.use('/api/admin',   verifyToken, adminRoutes);
-app.use('/api/tarifs',  verifyToken, tarifRoutes);
-app.get('/api/health',  (_, res) => res.json({ status: 'ok' }));
+app.use('/api/tarifs',   verifyToken, tarifRoutes);
+app.use('/api/payments',  paymentRoutes);
+app.use('/api/messages',  messageRoutes);
+app.get('/api/health',   (_, res) => res.json({ status: 'ok' }));
+app.get('/api/settings/public', async (_, res) => {
+  try {
+    const s = await Settings.get();
+    const now = new Date();
+    const active = s.referralEnabled
+      && (!s.referralStartDate || now >= s.referralStartDate)
+      && (!s.referralEndDate   || now <= s.referralEndDate);
+    res.json({
+      success: true,
+      referralEnabled:     active,
+      referralClientBonus: s.referralClientBonus,
+      referralDriverBonus: s.referralDriverBonus,
+      referralEndDate:     s.referralEndDate,
+    });
+  } catch (err) { res.json({ success: true, referralEnabled: true, referralClientBonus: 500, referralDriverBonus: 500 }); }
+});
 
 socketHandler(io);
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(async () => {
     console.log('✅ MongoDB connecté');
+
+    // Expirer les vieilles commandes diffuse (> 5 min) laissées par des sessions de test
+    try {
+      const Order = require('./models/Order');
+      const FIVE_MIN_AGO = new Date(Date.now() - 5 * 60 * 1000);
+      const expired = await Order.updateMany(
+        { status: 'diffuse', createdAt: { $lt: FIVE_MIN_AGO } },
+        { $set: { status: 'annule' } }
+      );
+      if (expired.modifiedCount > 0)
+        console.log(`🧹 ${expired.modifiedCount} commande(s) diffuse expirée(s) → annulé`);
+    } catch (e) { console.warn('Cleanup diffuse:', e.message); }
+
+    // Tarif course : prise en charge 1000 MRU, commission 10%
+    try {
+      const Tarif = require('./models/Tarif');
+      await Tarif.findOneAndUpdate(
+        { serviceType: 'course' },
+        { $set: { baseFee: 0, minimumFare: 100, platformCommission: 10, perKmFee: 30, perMinuteFee: 10, isActive: true } },
+        { upsert: true }
+      );
+      console.log('✅ Tarif course : 100 MRU minimum, 30 MRU/km, 10% commission');
+    } catch (e) { console.warn('Tarif course:', e.message); }
 
     // S'assure que l'index email est bien sparse (évite E11000 pour les clients sans email)
     try {

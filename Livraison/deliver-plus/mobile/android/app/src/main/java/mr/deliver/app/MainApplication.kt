@@ -9,12 +9,20 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactPackage
 import com.facebook.react.ReactHost
-import com.facebook.react.config.ReactFeatureFlags
+import com.facebook.react.ReactNativeApplicationEntryPoint
+import expo.modules.ExpoModulesPackage
+import com.reactnativecommunity.asyncstorage.AsyncStoragePackage
+import com.th3rdwave.safeareacontext.SafeAreaContextPackage
+import com.swmansion.rnscreens.RNScreensPackage
+import com.rnmaps.maps.MapsPackage
+import com.oney.WebRTCModule.WebRTCModulePackage
+import com.reactnativecommunity.webview.RNCWebViewPackage
+import io.invertase.notifee.NotifeePackage
+import io.invertase.firebase.app.ReactNativeFirebaseAppPackage
+import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
-import com.facebook.react.flipper.ReactNativeFlipper
-import com.facebook.soloader.SoLoader
 
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
@@ -25,12 +33,23 @@ class MainApplication : Application(), ReactApplication {
         this,
         object : DefaultReactNativeHost(this) {
           override fun getPackages(): List<ReactPackage> {
-            // Packages that cannot be autolinked yet can be added manually here, for example:
-            // packages.add(new MyReactNativePackage());
-            return PackageList(this).packages
+            val packages = PackageList(this).packages.toMutableList()
+            packages.add(ExpoModulesPackage())
+            packages.add(AsyncStoragePackage())
+            packages.add(SafeAreaContextPackage())
+            packages.add(RNScreensPackage())
+            packages.add(MapsPackage())
+            packages.add(WebRTCModulePackage())
+            packages.add(RNCWebViewPackage())
+            packages.add(NotifeePackage())
+            packages.add(ReactNativeFirebaseAppPackage())
+            packages.add(ReactNativeFirebaseMessagingPackage())
+            return packages
           }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
+
+          override fun getBundleAssetName(): String = "index.android.bundle"
 
           override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
 
@@ -44,17 +63,7 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    SoLoader.init(this, false)
-    if (!BuildConfig.REACT_NATIVE_UNSTABLE_USE_RUNTIME_SCHEDULER_ALWAYS) {
-      ReactFeatureFlags.unstable_useRuntimeSchedulerAlways = false
-    }
-    if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-      // If you opted-in for the New Architecture, we load the native entry point for this app.
-      load()
-    }
-    if (BuildConfig.DEBUG) {
-      ReactNativeFlipper.initializeFlipper(this, reactNativeHost.reactInstanceManager)
-    }
+    ReactNativeApplicationEntryPoint.loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
   }
 
