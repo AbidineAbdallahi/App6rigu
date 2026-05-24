@@ -167,7 +167,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { orderType, serviceType, items, pickupAddress, deliveryAddress,
-            distanceKm, isUrgent, notes, broadcastRadius = 3, trajetOuvert = false } = req.body;
+            distanceKm, isUrgent, notes, broadcastRadius = 50, trajetOuvert = false } = req.body;
 
     if (!orderType) return res.status(400).json({ success:false, message:'orderType requis (course ou livraison)' });
 

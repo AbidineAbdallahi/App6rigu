@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../stores/authStore';
 import useLangStore from '../stores/langStore';
 import { translations } from '../i18n';
+import amnirLogo from '../assets/amnir-logo.png';
 
 export default function LoginPage() {
   const [form, setForm] = useState({ email:'', password:'' });
@@ -20,9 +21,9 @@ export default function LoginPage() {
     <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#F7F6F2' }}>
       <div className="card" style={{ width:360, padding:32 }}>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:28 }}>
-          <div style={{ width:38, height:38, background:'#534AB7', color:'#fff', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>D+</div>
+          <img src={amnirLogo} alt="Amnir" style={{ width:48, height:48, borderRadius:12, objectFit:'cover' }} />
           <div>
-            <p style={{ fontWeight:500, fontSize:16 }}>Deliver+ Admin</p>
+            <p style={{ fontWeight:500, fontSize:16 }}>Amnir Admin</p>
             <p style={{ fontSize:12, color:'#6b6b67' }}>{t.login_panel}</p>
           </div>
         </div>

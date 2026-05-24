@@ -21,21 +21,13 @@ const isValidPhone = (phone) => {
 };
 const PHONE_ERR = 'Numéro invalide. Doit contenir 8 chiffres et commencer par 2, 3 ou 4.';
 
-// ─── Logo Amder ───────────────────────────────────────────────────────────────
-function AmderLogo({ size = 90 }) {
-  const r  = Math.round(size * 0.22);
-  const lw = Math.round(size * 0.115);
-  const lh = Math.round(size * 0.70);
-  const ang = 20;
+// ─── Logo Amnir ───────────────────────────────────────────────────────────────
+function AmnirLogo({ size = 90 }) {
   return (
-    <View style={{ width:size, height:size, borderRadius:r, backgroundColor:'#3B328F', overflow:'hidden', alignItems:'center', justifyContent:'center' }}>
-      <View style={{ position:'absolute', width:lw, height:lh, borderRadius:lw/2, backgroundColor:'white', left:size*0.14, top:size*0.1, transform:[{rotate:`${ang}deg`}] }}/>
-      <View style={{ position:'absolute', width:lw, height:lh, borderRadius:lw/2, backgroundColor:'white', right:size*0.14, top:size*0.1, transform:[{rotate:`${-ang}deg`}] }}/>
-      <View style={{ position:'absolute', top:size*0.53, flexDirection:'row', alignItems:'center', left:size*0.17 }}>
-        <View style={{ width:size*0.40, height:size*0.09, backgroundColor:'#F59E0B', borderRadius:3 }}/>
-        <View style={{ width:0, height:0, borderTopWidth:size*0.065, borderBottomWidth:size*0.065, borderLeftWidth:size*0.09, borderTopColor:'transparent', borderBottomColor:'transparent', borderLeftColor:'#F59E0B' }}/>
-      </View>
-    </View>
+    <Image
+      source={require('./assets/icon.png')}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.22) }}
+    />
   );
 }
 
@@ -46,7 +38,7 @@ function PendingScreen({ onBack }) {
   return (
     <SafeAreaView style={st.safe}>
       <ScrollView contentContainerStyle={st.center}>
-        <AmderLogo size={80} />
+        <AmnirLogo size={80} />
         <View style={{ marginTop:28, alignItems:'center', padding:24 }}>
           <Text style={{ fontSize:48, marginBottom:16 }}>⏳</Text>
           <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', textAlign:'center', marginBottom:10 }}>
@@ -152,7 +144,7 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
     return (
       <SafeAreaView style={st.safe}>
         <ScrollView contentContainerStyle={st.center}>
-          <AmderLogo size={80} />
+          <AmnirLogo size={80} />
           <View style={{ marginTop:28, alignItems:'center', padding:24 }}>
             <Text style={{ fontSize:48, marginBottom:16 }}>✅</Text>
             <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', textAlign:'center', marginBottom:10 }}>{t.complete_done_title}</Text>
@@ -174,7 +166,7 @@ function CompleteDocsScreen({ missingDocuments = [], missingInfoNote, onDone, on
   return (
     <SafeAreaView style={st.safe}>
       <ScrollView contentContainerStyle={[st.center, { paddingTop:16 }]}>
-        <AmderLogo size={70} />
+        <AmnirLogo size={70} />
         <View style={{ marginTop:20, width:'100%', padding:24 }}>
           <Text style={{ fontSize:20, fontWeight:'800', color:'#1a1a18', marginBottom:8 }}>{t.complete_title}</Text>
 
@@ -235,7 +227,7 @@ function RejectedScreen({ message, onBack }) {
   return (
     <SafeAreaView style={st.safe}>
       <ScrollView contentContainerStyle={st.center}>
-        <AmderLogo size={80} />
+        <AmnirLogo size={80} />
         <View style={{ marginTop:28, alignItems:'center', padding:24 }}>
           <Text style={{ fontSize:48, marginBottom:16 }}>❌</Text>
           <Text style={{ fontSize:20, fontWeight:'800', color:'#A32D2D', textAlign:'center', marginBottom:10 }}>
@@ -330,7 +322,7 @@ function ForgotPasswordScreen({ onBack }) {
     return (
       <SafeAreaView style={st.safe}>
         <ScrollView contentContainerStyle={st.center}>
-          <AmderLogo size={80} />
+          <AmnirLogo size={80} />
           <View style={{ marginTop: 28, alignItems: 'center', padding: 24 }}>
             <Text style={{ fontSize: 56, marginBottom: 16 }}>✅</Text>
             <Text style={{ fontSize: 20, fontWeight: '800', color: '#1a1a18', textAlign: 'center', marginBottom: 10 }}>
@@ -353,7 +345,7 @@ function ForgotPasswordScreen({ onBack }) {
     return (
       <SafeAreaView style={st.safe}>
         <ScrollView contentContainerStyle={st.center}>
-          <AmderLogo size={80} />
+          <AmnirLogo size={80} />
           <View style={{ marginTop: 28, alignItems: 'center', padding: 24 }}>
             <Text style={{ fontSize: 52, marginBottom: 16 }}>🔍</Text>
             <Text style={{ fontSize: 20, fontWeight: '800', color: '#1a1a18', textAlign: 'center', marginBottom: 10 }}>
@@ -380,7 +372,7 @@ function ForgotPasswordScreen({ onBack }) {
   return (
     <SafeAreaView style={st.safe}>
       <ScrollView contentContainerStyle={[st.center, { paddingTop: 16 }]}>
-        <AmderLogo size={70} />
+        <AmnirLogo size={70} />
         <Text style={{ fontSize: 22, fontWeight: '800', color: COLORS.text, marginTop: 16, marginBottom: 4 }}>
           {t.forgot_title}
         </Text>
@@ -526,8 +518,8 @@ function DriverLoginScreen({ onRegister }) {
           ))}
         </View>
 
-        <AmderLogo size={100} />
-        <Text style={st.title}>Amder</Text>
+        <AmnirLogo size={100} />
+        <Text style={st.title}>Amnir</Text>
         <Text style={st.sub}>{t.login_space}</Text>
         <View style={st.card}>
           {!!error && <View style={st.errBox}><Text style={[st.errTxt, rtl]}>{t[error] || error}</Text></View>}
@@ -594,8 +586,8 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <View style={{ flex:1, backgroundColor:'#3B328F', alignItems:'center', justifyContent:'center' }}>
-          <AmderLogo size={90} />
-          <Text style={{ color:'#fff', fontSize:22, fontWeight:'800', marginTop:18 }}>Amder</Text>
+          <AmnirLogo size={90} />
+          <Text style={{ color:'#fff', fontSize:22, fontWeight:'800', marginTop:18 }}>Amnir</Text>
         </View>
       </SafeAreaProvider>
     );

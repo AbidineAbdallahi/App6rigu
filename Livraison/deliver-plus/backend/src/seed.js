@@ -6,14 +6,16 @@ const Tarif  = require('./models/Tarif');
 
 async function seed() {
   await mongoose.connect(process.env.MONGODB_URI);
-  console.log('✅ Connecté');
+  console.log('✅ Connecté à', process.env.MONGODB_URI);
 
   // Admin
-  const adminExists = await User.findOne({ email: 'admin@deliver.mr' });
+  const adminExists = await User.findOne({ email: 'admin@amnir.mr' });
   if (!adminExists) {
-    await User.create({ firstName:'Admin', lastName:'Deliver', email:'admin@deliver.mr',
-      phone:'+222 XX XX XX XX', password:'admin123', role:'admin' });
-    console.log('✅ Admin créé  →  admin@deliver.mr / admin123');
+    await User.create({ firstName:'Admin', lastName:'Amnir', email:'admin@amnir.mr',
+      phone:'+222 00 00 00 01', password:'admin123', role:'admin' });
+    console.log('✅ Admin créé  →  admin@amnir.mr / admin123');
+  } else {
+    console.log('ℹ️  Admin déjà existant');
   }
 
   // Tarifs par défaut
@@ -29,12 +31,14 @@ async function seed() {
   console.log('✅ Tarifs par défaut créés');
 
   // Livreur test
-  const driverUserExists = await User.findOne({ email: 'khalil@deliver.mr' });
+  const driverUserExists = await User.findOne({ email: 'driver@amnir.mr' });
   if (!driverUserExists) {
-    const u = await User.create({ firstName:'Khalil', lastName:'Diallo', email:'khalil@deliver.mr',
-      phone:'+222 36 00 00 01', password:'driver123', role:'driver' });
+    const u = await User.create({ firstName:'Khalil', lastName:'Diallo', email:'driver@amnir.mr',
+      phone:'+222 36 00 00 02', password:'driver123', role:'driver' });
     await Driver.create({ user: u._id, zone:'Tevragh Zeïna', vehicleType:'moto' });
-    console.log('✅ Livreur test  →  khalil@deliver.mr / driver123');
+    console.log('✅ Livreur test  →  driver@amnir.mr / driver123');
+  } else {
+    console.log('ℹ️  Livreur test déjà existant');
   }
 
   console.log('🎉 Seed terminé');

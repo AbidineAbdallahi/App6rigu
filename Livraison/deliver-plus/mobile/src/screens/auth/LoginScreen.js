@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, Image, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import useAuthStore from '../../stores/authStore';
 import useLangStore from '../../stores/langStore';
@@ -22,8 +22,7 @@ export default function LoginScreen({ navigation }) {
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={styles.container}>
         <View style={styles.header}>
-          <View style={styles.logo}><Text style={styles.logoText}>D+</Text></View>
-          <Text style={styles.title}>Deliver+</Text>
+          <Image source={require('../../../assets/icon.png')} style={styles.logo} />
           <Text style={styles.subtitle}>Connexion à votre compte</Text>
         </View>
 
@@ -59,8 +58,7 @@ const styles = StyleSheet.create({
   safe:      { flex:1, backgroundColor: COLORS.bg },
   container: { flex:1, justifyContent:'center', padding:24 },
   header:    { alignItems:'center', marginBottom:40 },
-  logo:      { width:60, height:60, borderRadius:16, backgroundColor: COLORS.purple, alignItems:'center', justifyContent:'center', marginBottom:12 },
-  logoText:  { color:'#fff', fontSize:22, fontWeight:'700' },
+  logo:      { width:100, height:100, borderRadius:24, marginBottom:16 },
   title:     { fontSize:24, fontWeight:'600', color: COLORS.text },
   subtitle:  { fontSize:14, color: COLORS.muted, marginTop:4 },
   form:      { backgroundColor:'#fff', borderRadius:16, padding:20, borderWidth:.5, borderColor: COLORS.border },

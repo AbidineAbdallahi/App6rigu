@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Linking, Animated, Alert } from 'react-native';
+import { WebView } from 'react-native-webview';
 import CallModal from './CallModal';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { io } from 'socket.io-client';
 import api from '../../services/api';
 import useAuthStore from '../../stores/authStore';
 import useLangStore from '../../stores/langStore';
 import { translations } from '../../i18n';
 import { COLORS, SOCKET_URL, SERVICE_ICONS } from '../../constants';
-
-const NOUAKCHOTT = { latitude: 18.0735, longitude: -15.9582, latitudeDelta: 0.05, longitudeDelta: 0.05 };
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
@@ -19,18 +17,36 @@ function haversineKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function parseCoords(addr) {
-  if (!addr) return null;
-  if (typeof addr.lat === 'number' && typeof addr.lng === 'number')
-    return { latitude: addr.lat, longitude: addr.lng };
-  const raw = addr.label || addr.zone || addr.street || '';
-  const m = raw.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
-  if (m) return { latitude: parseFloat(m[1]), longitude: parseFloat(m[2]) };
-  return null;
-}
 
 const LIVRAISON_STEPS = ['en_attente', 'accepte', 'en_preparation', 'en_route', 'livre'];
 const COURSE_STEPS    = ['en_attente', 'accepte', 'en_route', 'en_preparation', 'livre'];
+
+function getTrackingHTML(centerLat, centerLng, pickupLat, pickupLng, deliveryLat, deliveryLng, initDriverLat, initDriverLng) {
+  const c = `[${centerLat},${centerLng}]`;
+  return `<!DOCTYPE html>
+<html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>*{margin:0;padding:0}html,body,#map{width:100%;height:100%}.leaflet-control-attribution{display:none}</style>
+</head><body>
+<div id="map"></div>
+<script>
+var map=L.map('map',{zoomControl:false}).setView(${c},15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+function mkIcon(e,s){return L.divIcon({html:'<div style="font-size:'+s+'px;line-height:1">'+e+'</div>',className:'',iconSize:[s,s],iconAnchor:[s/2,s]});}
+${pickupLat && pickupLng ? `L.marker([${pickupLat},${pickupLng}],{icon:mkIcon('📍',28)}).addTo(map);` : ''}
+${deliveryLat && deliveryLng ? `L.marker([${deliveryLat},${deliveryLng}],{icon:mkIcon('🏠',28)}).addTo(map);` : ''}
+var dm=null,rl=null;
+function updateDriver(lat,lng){
+  if(!dm){dm=L.marker([lat,lng],{icon:mkIcon('🛵',32)}).addTo(map);}
+  else{dm.setLatLng([lat,lng]);}
+  map.panTo([lat,lng],{animate:true,duration:0.8});
+}
+${initDriverLat && initDriverLng ? `updateDriver(${initDriverLat},${initDriverLng});` : ''}
+</script>
+</body></html>`;
+}
 
 const fmtTime = (sec) => {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -63,10 +79,11 @@ export default function OrderTrackScreen({ route, navigation }) {
   const socketRef      = useRef(null);
   const timerRef       = useRef(null);
   const startMsRef     = useRef(null);
-  const mapRef         = useRef(null);
   const etaPulse       = useRef(new Animated.Value(1)).current;
   const lastDriverPosRef = useRef(null);
   const orderStatusRef   = useRef(null);
+  const webviewRef     = useRef(null);
+  const [mapHtml,      setMapHtml]      = useState(null);
 
   const startChrono = (sinceIso) => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -175,25 +192,25 @@ export default function OrderTrackScreen({ route, navigation }) {
     };
   }, [orderId]);
 
-  const pickupCoords   = order ? parseCoords(order.pickupAddress)   : null;
-  const deliveryCoords = order ? parseCoords(order.deliveryAddress) : null;
-
-  // Recadrer la carte automatiquement sur les points visibles
+  // Initialiser la carte une seule fois quand la commande est chargée
   useEffect(() => {
-    if (!mapRef.current) return;
-    const coords = [];
-    if (driverPos)    coords.push({ latitude: driverPos.lat, longitude: driverPos.lng });
-    if (pickupCoords)   coords.push(pickupCoords);
-    if (deliveryCoords) coords.push(deliveryCoords);
-    if (coords.length === 1) {
-      mapRef.current.animateToRegion({ ...coords[0], latitudeDelta: 0.01, longitudeDelta: 0.01 }, 600);
-    } else if (coords.length > 1) {
-      mapRef.current.fitToCoordinates(coords, {
-        edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
-        animated: true,
-      });
-    }
-  }, [driverPos, order?._id, order?.status]);
+    if (!order || mapHtml) return;
+    const pLat  = order.pickupAddress?.lat;
+    const pLng  = order.pickupAddress?.lng;
+    const deLat = order.deliveryAddress?.lat;
+    const deLng = order.deliveryAddress?.lng;
+    const iLat  = driverPos?.lat || order.driver?.currentLocation?.lat;
+    const iLng  = driverPos?.lng || order.driver?.currentLocation?.lng;
+    const cLat  = iLat || pLat || 18.0858;
+    const cLng  = iLng || pLng || -15.9785;
+    setMapHtml(getTrackingHTML(cLat, cLng, pLat, pLng, deLat, deLng, iLat, iLng));
+  }, [order]);
+
+  // Mettre à jour le marqueur chauffeur en temps réel
+  useEffect(() => {
+    if (!driverPos || !webviewRef.current) return;
+    webviewRef.current.injectJavaScript(`updateDriver(${driverPos.lat},${driverPos.lng});true;`);
+  }, [driverPos]);
 
   const openInMaps = () => {
     if (!driverPos) return;
@@ -453,50 +470,23 @@ export default function OrderTrackScreen({ route, navigation }) {
           </TouchableOpacity>
         )}
 
-        {/* Carte en temps réel */}
+        {/* Carte en temps réel OpenStreetMap */}
         <View style={styles.mapContainer}>
-          <MapView
-            ref={mapRef}
-            style={styles.map}
-            provider={PROVIDER_GOOGLE}
-            initialRegion={NOUAKCHOTT}
-            showsCompass
-            showsScale
-            mapType="standard"
-          >
-            {/* Marqueur chauffeur */}
-            {driverPos && (
-              <Marker coordinate={{ latitude: driverPos.lat, longitude: driverPos.lng }} anchor={{ x: 0.5, y: 0.5 }}>
-                <View style={styles.driverDot}>
-                  <View style={styles.driverDotInner} />
-                </View>
-              </Marker>
-            )}
-            {/* Marqueur retrait */}
-            {pickupCoords && (
-              <Marker coordinate={pickupCoords} anchor={{ x: 0.5, y: 1 }}>
-                <Text style={{ fontSize: 30 }}>📍</Text>
-              </Marker>
-            )}
-            {/* Marqueur livraison */}
-            {deliveryCoords && (
-              <Marker coordinate={deliveryCoords} anchor={{ x: 0.5, y: 1 }}>
-                <Text style={{ fontSize: 30 }}>🏠</Text>
-              </Marker>
-            )}
-            {/* Ligne chauffeur → destination */}
-            {driverPos && (pickupCoords || deliveryCoords) && (
-              <Polyline
-                coordinates={[
-                  { latitude: driverPos.lat, longitude: driverPos.lng },
-                  order?.status === 'en_route' && deliveryCoords ? deliveryCoords : (pickupCoords || deliveryCoords),
-                ]}
-                strokeColor={COLORS.purple}
-                strokeWidth={3}
-                lineDashPattern={[10, 5]}
-              />
-            )}
-          </MapView>
+          {mapHtml ? (
+            <WebView
+              ref={webviewRef}
+              style={{ flex: 1 }}
+              source={{ html: mapHtml }}
+              javaScriptEnabled
+              domStorageEnabled
+              originWhitelist={['*']}
+              mixedContentMode="always"
+            />
+          ) : (
+            <View style={styles.mapLoading}>
+              <ActivityIndicator color={COLORS.purple} />
+            </View>
+          )}
 
           {/* Badge EN DIRECT */}
           {driverPos && (
@@ -506,12 +496,13 @@ export default function OrderTrackScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* Bouton ouvrir dans Maps */}
+          {/* Ouvrir dans OSM */}
           <TouchableOpacity style={styles.mapOpenBtn} onPress={openInMaps}>
-            <Text style={styles.mapOpenBtnTxt}>{t.track_map_btn}</Text>
+            <Text style={styles.mapOpenBtnTxt}>{t.track_map_btn || 'Agrandir'}</Text>
           </TouchableOpacity>
 
-          {!driverPos && (
+          {/* Aucune position */}
+          {!driverPos && mapHtml && (
             <View style={styles.noPosOverlay}>
               <Text style={styles.noPosText}>{t.track_no_pos}</Text>
             </View>
@@ -635,16 +626,14 @@ const styles = StyleSheet.create({
   driverAvatar:     { width: 48, height: 48, borderRadius: 24, backgroundColor: '#EAF3DE', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   driverName:       { fontSize: 14, fontWeight: '600', color: COLORS.text },
   driverPhone:      { fontSize: 12, color: COLORS.muted, marginTop: 2 },
-  mapContainer:     { height: 220, borderRadius: 12, overflow: 'hidden', marginTop: 12, position: 'relative' },
-  map:              { flex: 1 },
-  driverDot:        { width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(83,74,183,0.25)', alignItems: 'center', justifyContent: 'center' },
-  driverDotInner:   { width: 13, height: 13, borderRadius: 7, backgroundColor: COLORS.purple, borderWidth: 2.5, borderColor: '#fff' },
+  mapContainer:     { height: 240, borderRadius: 12, overflow: 'hidden', marginTop: 12, position: 'relative' },
+  mapLoading:       { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F4FF' },
   liveBadge:        { position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#EAF3DE', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   liveDot:          { width: 7, height: 7, borderRadius: 4, backgroundColor: '#3B6D11' },
   liveBadgeTxt:     { fontSize: 10, fontWeight: '700', color: '#27500A' },
   mapOpenBtn:       { position: 'absolute', bottom: 10, right: 10, backgroundColor: COLORS.purple, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
   mapOpenBtnTxt:    { color: '#fff', fontWeight: '600', fontSize: 12 },
-  noPosOverlay:     { position: 'absolute', inset: 0, top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(247,246,242,0.85)' },
+  noPosOverlay:     { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(247,246,242,0.85)' },
   noPosText:        { fontSize: 13, color: COLORS.muted },
   routeRow:         { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 4 },
   routeLine:        { width: 1, height: 14, backgroundColor: COLORS.border, marginLeft: 10, marginBottom: 4 },

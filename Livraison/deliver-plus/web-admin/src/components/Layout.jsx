@@ -5,6 +5,7 @@ import useAuthStore from '../stores/authStore';
 import useLangStore from '../stores/langStore';
 import { translations } from '../i18n';
 import api from '../services/api';
+import amnirLogo from '../assets/amnir-logo.png';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
@@ -64,8 +65,7 @@ export default function Layout() {
       <aside style={{ width:210, flexShrink:0, background:'#fff', borderRight:'.5px solid rgba(0,0,0,0.09)', display:'flex', flexDirection:'column', padding:'16px 12px' }}>
         {/* Logo */}
         <div style={{ display:'flex', alignItems:'center', gap:8, paddingBottom:16, borderBottom:'.5px solid rgba(0,0,0,0.09)', marginBottom:12 }}>
-          <div style={{ width:30, height:30, background:'#534AB7', color:'#fff', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:12 }}>D+</div>
-          <span style={{ fontWeight:500, fontSize:15 }}>Deliver+</span>
+          <img src={amnirLogo} alt="Amnir" style={{ width:36, height:36, borderRadius:10, objectFit:'cover' }} />
         </div>
 
         {/* Navigation */}

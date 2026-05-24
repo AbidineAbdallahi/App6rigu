@@ -44,8 +44,8 @@ export default function ProfileScreen() {
   const handleShareCode = async () => {
     try {
       await Share.share({
-        message: `Rejoins Amder comme livreur avec mon code : ${driverProfile?.referralCode}\nTu reçois 500 MRU sur ton solde dès l'inscription !`,
-        title: 'Mon code Amder Livreur',
+        message: `Rejoins Amnir comme livreur avec mon code : ${driverProfile?.referralCode}\nTu reçois 500 MRU sur ton solde dès l'inscription !`,
+        title: 'Mon code Amnir Livreur',
       });
     } catch {}
   };

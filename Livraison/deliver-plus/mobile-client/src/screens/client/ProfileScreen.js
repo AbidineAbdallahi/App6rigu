@@ -120,8 +120,8 @@ export default function ProfileScreen() {
   const handleShareCode = async () => {
     try {
       await Share.share({
-        message: `Utilise mon code de parrainage Amder : ${user?.referralCode}\nTélécharge l'app et économise 500 MRU sur ta 1ère commande !`,
-        title: 'Mon code Amder',
+        message: `Utilise mon code de parrainage Amnir : ${user?.referralCode}\nTélécharge l'app et économise 500 MRU sur ta 1ère commande !`,
+        title: 'Mon code Amnir',
       });
     } catch {}
   };

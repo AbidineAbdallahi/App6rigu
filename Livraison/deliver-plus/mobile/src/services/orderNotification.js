@@ -64,15 +64,15 @@ export async function showOrderFullScreen(order, distance) {
       // ← c'est ça qui ouvre l'app sur l'écran verrouillé comme un appel
       fullScreenAction: {
         id: 'default',
-        launchActivity: 'mr.deliver.app.MainActivity',
+        launchActivity: 'mr.amnir.app.MainActivity',
         launchActivityFlags: [AndroidLaunchActivityFlag.SINGLE_TOP],
       },
       pressAction: {
         id: 'default',
-        launchActivity: 'mr.deliver.app.MainActivity',
+        launchActivity: 'mr.amnir.app.MainActivity',
       },
       actions: [
-        { title: '✅ Accepter', pressAction: { id: 'accept', launchActivity: 'mr.deliver.app.MainActivity' } },
+        { title: '✅ Accepter', pressAction: { id: 'accept', launchActivity: 'mr.amnir.app.MainActivity' } },
         { title: '✗ Refuser',  pressAction: { id: 'reject' } },
       ],
       sound: 'alert',

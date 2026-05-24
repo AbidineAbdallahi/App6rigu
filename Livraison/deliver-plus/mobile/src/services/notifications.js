@@ -79,12 +79,13 @@ export async function registerForPushNotifications() {
 
     // Enregistrer aussi le token FCM Firebase (pour les notifications plein écran app fermée)
     try {
-      const authStatus = await messaging().requestPermission();
+      const m = messaging();
+      const authStatus = await m.requestPermission();
       const enabled =
         authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
         authStatus === messaging.AuthorizationStatus.PROVISIONAL;
       if (enabled) {
-        const fcmToken = await messaging().getToken();
+        const fcmToken = await m.getToken();
         if (fcmToken) {
           await api.patch('/users/fcm-token', { fcmToken });
           console.log('[FCM] ✅ Token FCM sauvegardé');

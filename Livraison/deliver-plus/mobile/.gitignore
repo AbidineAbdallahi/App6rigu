@@ -1,0 +1,14 @@
+node_modules/
+.expo/
+dist/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+android/app/build/
+android/.gradle/
+android/local.properties

@@ -1,15 +1,16 @@
 {
   "expo": {
-    "name": "Amder Client",
-    "slug": "amder-client",
+    "name": "Amnir Client",
+    "slug": "amnir-client",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#3B328F"
       },
-      "package": "mr.amder.client",
+      "package": "mr.amnir.client",
       "config": {
         "googleMaps": {
           "apiKey": "REMPLACE_PAR_TA_CLE_GOOGLE_MAPS"
@@ -21,18 +22,18 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "mr.amder.client",
+      "bundleIdentifier": "mr.amnir.client",
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Amder a besoin de votre position pour la livraison.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Amder a besoin de votre position pour la livraison."
+        "NSLocationWhenInUseUsageDescription": "Amnir a besoin de votre position pour la livraison.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Amnir a besoin de votre position pour la livraison."
       }
     },
     "plugins": [
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Amder a besoin de votre position pour la livraison."
+          "locationAlwaysAndWhenInUsePermission": "Amnir a besoin de votre position pour la livraison."
         }
       ],
       [

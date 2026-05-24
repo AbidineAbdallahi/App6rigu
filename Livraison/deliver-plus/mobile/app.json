@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Amder",
-    "slug": "amder",
+    "name": "Amnir",
+    "slug": "amnir",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
-      "package": "mr.deliver.app",
+      "package": "mr.amnir.app",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyANTP0WQDPwx1iB0MKajpybQQJKS4sN9JU"
@@ -18,7 +18,7 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "mr.deliver.app",
+      "bundleIdentifier": "mr.amnir.app",
       "config": {
         "googleMapsApiKey": "AIzaSyANTP0WQDPwx1iB0MKajpybQQJKS4sN9JU"
       }

@@ -27,7 +27,7 @@ export const translations = {
     otp_sec: 'sec',
 
     // Auth — Bienvenue
-    auth_welcome_title: 'Bienvenue sur Amder',
+    auth_welcome_title: 'Bienvenue sur Amnir',
     auth_welcome_sub: 'Service de livraison express',
     auth_btn_login: 'Se connecter',
     auth_btn_register: 'Créer un compte',
@@ -283,7 +283,7 @@ export const translations = {
     otp_sec: 'ث',
 
     // Auth — Bienvenue
-    auth_welcome_title: 'مرحباً بك في Amder',
+    auth_welcome_title: 'مرحباً بك في Amnir',
     auth_welcome_sub: 'خدمة التوصيل السريع',
     auth_btn_login: 'تسجيل الدخول',
     auth_btn_register: 'إنشاء حساب',

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, StyleSheet, Linking, Alert, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { setAudioModeAsync } from 'expo-audio';
+let InCallManager = null;
+try { InCallManager = require('react-native-incall-manager').default; } catch {}
 import { COLORS } from '../../constants';
 
 let RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, mediaDevices;
@@ -30,6 +32,7 @@ export default function CallModal({
 }) {
   const [state, setState]     = useState(() => mode === 'caller' ? 'calling' : 'ringing');
   const [muted, setMuted]     = useState(false);
+  const [speaker, setSpeaker] = useState(false);
   const [callSec, setCallSec] = useState(0);
 
   const pcRef             = useRef(null);
@@ -209,7 +212,14 @@ export default function CallModal({
     pcRef.current = null;
     iceCandidateQueue.current = [];
     setCallSec(0);
+    try { InCallManager?.stop(); } catch {}
     deactivateCallAudio();
+  };
+
+  const toggleSpeaker = () => {
+    const next = !speaker;
+    InCallManager?.setSpeakerphoneOn(next);
+    setSpeaker(next);
   };
 
   const handleOffer = async (sdp) => {
@@ -227,6 +237,8 @@ export default function CallModal({
         if (event.streams?.[0]) remoteStreamRef.current = event.streams[0];
         setState('active');
         startTimer();
+        InCallManager?.start({ media: 'audio' });
+        InCallManager?.setProximitySensorEnabled(true);
       };
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       for (const c of iceCandidateQueue.current) {
@@ -257,6 +269,8 @@ export default function CallModal({
         if (event.streams?.[0]) remoteStreamRef.current = event.streams[0];
         setState('active');
         startTimer();
+        InCallManager?.start({ media: 'audio' });
+        InCallManager?.setProximitySensorEnabled(true);
       };
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -413,7 +427,7 @@ export default function CallModal({
               </View>
             )}
 
-            {/* Active: Mute + End */}
+            {/* Active: Mute + Speaker + End */}
             {isActive && (
               <>
                 <View style={styles.btnBlock}>
@@ -424,6 +438,15 @@ export default function CallModal({
                     <Text style={styles.circleBtnIcon}>{muted ? '🔇' : '🎙️'}</Text>
                   </TouchableOpacity>
                   <Text style={styles.circleLabel}>{muted ? 'Muet' : 'Micro'}</Text>
+                </View>
+                <View style={styles.btnBlock}>
+                  <TouchableOpacity
+                    style={[styles.circleBtn, styles.circleBtnGhost, speaker && styles.circleBtnBlue]}
+                    onPress={toggleSpeaker}
+                  >
+                    <Text style={styles.circleBtnIcon}>{speaker ? '🔊' : '🔈'}</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.circleLabel}>{speaker ? 'HP actif' : 'Haut-parleur'}</Text>
                 </View>
                 <View style={styles.btnBlock}>
                   <TouchableOpacity style={[styles.circleBtn, styles.circleBtnRed]} onPress={() => endCall()}>
@@ -641,6 +664,10 @@ const styles = StyleSheet.create({
   },
   circleBtnAmber: {
     backgroundColor: '#E67E22',
+    borderWidth: 0,
+  },
+  circleBtnBlue: {
+    backgroundColor: '#185FA5',
     borderWidth: 0,
   },
 });

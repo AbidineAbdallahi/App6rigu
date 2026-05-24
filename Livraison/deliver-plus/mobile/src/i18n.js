@@ -207,7 +207,7 @@ export const translations = {
 
     // Recharge solde
     recharge_btn:      '💬 Recharger via WhatsApp',
-    recharge_whatsapp_msg: 'Bonjour, je souhaite recharger mon solde Amder.\nMon numéro :',
+    recharge_whatsapp_msg: 'Bonjour, je souhaite recharger mon solde Amnir.\nMon numéro :',
     recharge_history:  'Historique des recharges',
     recharge_credit:   'Crédit', recharge_debit: 'Débit',
     recharge_empty:    'Aucune transaction',
@@ -533,7 +533,7 @@ export const translations = {
 
     // Recharge solde
     recharge_btn:      '💬 شحن عبر واتساب',
-    recharge_whatsapp_msg: 'مرحباً، أريد شحن رصيدي في Amder.\nرقمي:',
+    recharge_whatsapp_msg: 'مرحباً، أريد شحن رصيدي في Amnir.\nرقمي:',
     recharge_history:  'سجل الشحن',
     recharge_credit:   'إضافة', recharge_debit: 'خصم',
     recharge_empty:    'لا توجد معاملات',

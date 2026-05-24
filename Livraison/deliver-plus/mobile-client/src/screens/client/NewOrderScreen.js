@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, ActivityIndicator, Alert, Modal,
-  Dimensions, Platform,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import api from '../../services/api';
 import { COLORS, SERVICE_ICONS, SERVICE_COLORS } from '../../constants';
@@ -62,7 +62,7 @@ function haversine(lat1, lng1, lat2, lng2) {
 async function nominatimSearch(query) {
   try {
     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ' Nouakchott')}&limit=6&countrycodes=mr&accept-language=fr`;
-    const res = await fetch(url, { headers: { 'User-Agent': 'AmderApp/1.0' } });
+    const res = await fetch(url, { headers: { 'User-Agent': 'AmnirApp/1.0' } });
     const data = await res.json();
     return data.map(d => ({
       label: d.display_name.split(',').slice(0, 3).join(', '),
@@ -76,7 +76,7 @@ async function reverseGeocode(lat, lng) {
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=fr`,
-      { headers: { 'User-Agent': 'AmderApp/1.0' } }
+      { headers: { 'User-Agent': 'AmnirApp/1.0' } }
     );
     const data = await res.json();
     const a = data.address || {};
@@ -92,45 +92,66 @@ function filterLocal(query) {
   return PLACES_LOCAUX.filter(p => p.label.toLowerCase().includes(q)).slice(0, 5);
 }
 
-// ─── Modal carte plein écran ──────────────────────────────────────────────────
-function MapPickerModal({ visible, onClose, onConfirm, initialRegion, title }) {
+// ─── HTML Leaflet (OpenStreetMap, gratuit, sans API key) ──────────────────────
+function getMapHTML(lat, lng) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body,#map{width:100%;height:100%}
+    .leaflet-control-attribution{display:none}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map',{zoomControl:true}).setView([${lat},${lng}],15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+    map.on('moveend',function(){
+      var c=map.getCenter();
+      window.ReactNativeWebView.postMessage(JSON.stringify({lat:c.lat,lng:c.lng}));
+    });
+  </script>
+</body>
+</html>`;
+}
+
+// ─── Modal carte OpenStreetMap (Leaflet, gratuit, sans API key) ───────────────
+function MapPickerModal({ visible, onClose, onConfirm, initialCoords, title }) {
   const { lang } = useLangStore();
   const t = translations[lang];
 
-  const mapRef = useRef(null);
-  const [region, setRegion] = useState(initialRegion || {
-    latitude: 18.0858, longitude: -15.9785,
-    latitudeDelta: 0.01, longitudeDelta: 0.01,
-  });
+  const defaultCoords = { lat: 18.0858, lng: -15.9785 };
+  const initCoords    = initialCoords || defaultCoords;
+
+  const webviewRef   = useRef(null);
+  const geocodeTimer = useRef(null);
+  const searchTimer  = useRef(null);
+
+  const [center,     setCenter]     = useState(initCoords);
   const [label,      setLabel]      = useState('');
   const [geocoding,  setGeocoding]  = useState(false);
   const [searchText, setSearchText] = useState('');
   const [searchRes,  setSearchRes]  = useState([]);
   const [searching,  setSearching]  = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
-  const geocodeTimer  = useRef(null);
-  const searchTimer   = useRef(null);
 
-  // reset à chaque ouverture
-  useEffect(() => {
-    if (visible) {
-      setRegion(initialRegion || { latitude: 18.0858, longitude: -15.9785, latitudeDelta: 0.01, longitudeDelta: 0.01 });
-      setLabel('');
-      setSearchText('');
-      setSearchRes([]);
-      setShowSearch(false);
-    }
-  }, [visible]);
-
-  const onRegionChangeComplete = useCallback((r) => {
-    setRegion(r);
-    clearTimeout(geocodeTimer.current);
-    geocodeTimer.current = setTimeout(async () => {
-      setGeocoding(true);
-      const l = await reverseGeocode(r.latitude, r.longitude);
-      setLabel(l);
-      setGeocoding(false);
-    }, 600);
+  // Géocodage inversé quand la carte bouge
+  const onMessage = useCallback((e) => {
+    try {
+      const { lat, lng } = JSON.parse(e.nativeEvent.data);
+      setCenter({ lat, lng });
+      clearTimeout(geocodeTimer.current);
+      geocodeTimer.current = setTimeout(async () => {
+        setGeocoding(true);
+        const l = await reverseGeocode(lat, lng);
+        setLabel(l);
+        setGeocoding(false);
+      }, 800);
+    } catch {}
   }, []);
 
   const onSearchChange = (v) => {
@@ -143,44 +164,42 @@ function MapPickerModal({ visible, onClose, onConfirm, initialRegion, title }) {
       setSearching(true);
       const remote = await nominatimSearch(v);
       const seen = new Set(local.map(p => p.label));
-      setSearchRes([...local, ...remote.filter(r => !seen.has(r.label))].slice(0, 8));
+      setSearchRes([...local, ...remote.filter(r => !seen.has(r.label))].slice(0, 6));
       setSearching(false);
     }, 400);
   };
 
   const pickSearchResult = (item) => {
-    const r = { latitude: item.lat, longitude: item.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 };
-    mapRef.current?.animateToRegion(r, 500);
-    setRegion(r);
+    webviewRef.current?.injectJavaScript(`map.setView([${item.lat},${item.lng}],15);true;`);
+    setCenter({ lat: item.lat, lng: item.lng });
     setLabel(item.label);
     setSearchText(item.label);
     setSearchRes([]);
-    setShowSearch(false);
   };
 
   const confirm = () => {
-    onConfirm({ label: label || t.new_map_selected, lat: region.latitude, lng: region.longitude });
+    onConfirm({ label: label || t.new_map_selected || 'Position sélectionnée', lat: center.lat, lng: center.lng });
     onClose();
   };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1 }}>
-        <MapView
-          ref={mapRef}
+        {/* Carte OpenStreetMap */}
+        <WebView
+          ref={webviewRef}
           style={{ flex: 1 }}
-          provider={PROVIDER_GOOGLE}
-          initialRegion={region}
-          onRegionChangeComplete={onRegionChangeComplete}
-          showsUserLocation
-          showsMyLocationButton={false}
+          source={{ html: getMapHTML(initCoords.lat, initCoords.lng) }}
+          onMessage={onMessage}
+          javaScriptEnabled
+          domStorageEnabled
+          originWhitelist={['*']}
+          mixedContentMode="always"
         />
 
-        {/* Pin central fixe */}
+        {/* Pin central natif (pas dans le WebView) */}
         <View pointerEvents="none" style={mp.pinContainer}>
-          <View style={mp.pin}>
-            <Text style={{ fontSize: 32 }}>📍</Text>
-          </View>
+          <Text style={{ fontSize: 36, lineHeight: 40 }}>📍</Text>
           <View style={mp.pinShadow} />
         </View>
 
@@ -189,11 +208,7 @@ function MapPickerModal({ visible, onClose, onConfirm, initialRegion, title }) {
           <TouchableOpacity onPress={onClose} style={mp.backBtn}>
             <Text style={{ fontSize: 20, color: COLORS.text }}>←</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={mp.searchBox}
-            onPress={() => setShowSearch(true)}
-            activeOpacity={1}
-          >
+          <View style={mp.searchBox}>
             <Text style={{ fontSize: 14 }}>🔍</Text>
             <TextInput
               style={mp.searchInput}
@@ -201,25 +216,26 @@ function MapPickerModal({ visible, onClose, onConfirm, initialRegion, title }) {
               onChangeText={onSearchChange}
               placeholder={t.new_map_search_ph || 'Rechercher un lieu…'}
               placeholderTextColor={COLORS.muted}
-              onFocus={() => setShowSearch(true)}
               returnKeyType="search"
             />
             {searching && <ActivityIndicator size="small" color={COLORS.purple} style={{ marginRight: 4 }} />}
-          </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Résultats de recherche */}
-        {showSearch && searchRes.length > 0 && (
+        {/* Résultats recherche en dropdown */}
+        {searchRes.length > 0 && (
           <View style={mp.searchDropdown}>
-            {searchRes.map((r, i) => (
-              <TouchableOpacity
-                key={i}
-                style={[mp.searchItem, i < searchRes.length - 1 && mp.searchItemBorder]}
-                onPress={() => pickSearchResult(r)}
-              >
-                <Text style={{ fontSize: 13, color: COLORS.text }} numberOfLines={2}>{r.label}</Text>
-              </TouchableOpacity>
-            ))}
+            <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 240 }}>
+              {searchRes.map((r, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={[mp.searchItem, i < searchRes.length - 1 && mp.searchItemBorder]}
+                  onPress={() => pickSearchResult(r)}
+                >
+                  <Text style={{ fontSize: 13, color: COLORS.text }} numberOfLines={2}>{r.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
         )}
 
@@ -230,7 +246,7 @@ function MapPickerModal({ visible, onClose, onConfirm, initialRegion, title }) {
             <View style={{ flex: 1 }}>
               {geocoding
                 ? <ActivityIndicator size="small" color={COLORS.purple} />
-                : <Text style={mp.addressText} numberOfLines={2}>{label || t.new_map_moving}</Text>
+                : <Text style={mp.addressText} numberOfLines={2}>{label || (t.new_map_moving || 'Déplacez la carte…')}</Text>
               }
             </View>
           </View>
@@ -453,13 +469,6 @@ export default function NewOrderScreen({ route, navigation }) {
     } finally { setSubmitting(false); }
   };
 
-  const pickupRegion = pickup
-    ? { latitude: pickup.lat, longitude: pickup.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-    : undefined;
-  const deliveryRegion = delivery
-    ? { latitude: delivery.lat, longitude: delivery.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-    : pickupRegion;
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
@@ -630,21 +639,25 @@ export default function NewOrderScreen({ route, navigation }) {
 
       </ScrollView>
 
-      {/* ── Modals carte ──────────────────────────────────────────────────────── */}
-      <MapPickerModal
-        visible={mapTarget === 'pickup'}
-        title={t.new_map_pickup_title}
-        initialRegion={pickupRegion}
-        onClose={() => setMapTarget(null)}
-        onConfirm={(point) => { setPickup(point); setMapTarget(null); }}
-      />
-      <MapPickerModal
-        visible={mapTarget === 'delivery'}
-        title={t.new_map_dest_title}
-        initialRegion={deliveryRegion}
-        onClose={() => setMapTarget(null)}
-        onConfirm={(point) => { setDelivery(point); setMapTarget(null); }}
-      />
+      {/* ── Modal carte OpenStreetMap ─────────────────────────────────────────── */}
+      {!!mapTarget && (
+        <MapPickerModal
+          visible
+          key={mapTarget}
+          title={mapTarget === 'pickup' ? t.new_map_pickup_title : t.new_map_dest_title}
+          initialCoords={
+            mapTarget === 'pickup'
+              ? (pickup   ? { lat: pickup.lat,   lng: pickup.lng   } : undefined)
+              : (delivery ? { lat: delivery.lat, lng: delivery.lng } : pickup ? { lat: pickup.lat, lng: pickup.lng } : undefined)
+          }
+          onClose={() => setMapTarget(null)}
+          onConfirm={(point) => {
+            if (mapTarget === 'pickup') setPickup(point);
+            else setDelivery(point);
+            setMapTarget(null);
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -700,20 +713,19 @@ const st = StyleSheet.create({
 });
 
 const mp = StyleSheet.create({
-  pinContainer:      { position:'absolute', top:0, left:0, right:0, bottom:0, alignItems:'center', justifyContent:'center', pointerEvents:'none' },
-  pin:               { marginBottom: -8 },
-  pinShadow:         { width:12, height:5, borderRadius:6, backgroundColor:'rgba(0,0,0,0.25)' },
-  topBar:            { position:'absolute', top:0, left:0, right:0, flexDirection:'row', alignItems:'center', gap:10, padding:12, paddingTop: Platform.OS === 'ios' ? 54 : 16, backgroundColor:'rgba(255,255,255,0.97)' },
-  backBtn:           { width:38, height:38, borderRadius:19, backgroundColor:'#f0f0f0', alignItems:'center', justifyContent:'center' },
-  searchBox:         { flex:1, flexDirection:'row', alignItems:'center', gap:8, backgroundColor: COLORS.bg, borderRadius:12, paddingHorizontal:12, paddingVertical:9, borderWidth:.5, borderColor: COLORS.border },
-  searchInput:       { flex:1, fontSize:14, color: COLORS.text, padding:0 },
-  searchDropdown:    { position:'absolute', top: Platform.OS === 'ios' ? 110 : 72, left:12, right:12, backgroundColor:'#fff', borderRadius:12, borderWidth:.5, borderColor: COLORS.border, shadowColor:'#000', shadowOffset:{width:0,height:4}, shadowOpacity:.1, shadowRadius:8, elevation:10, zIndex:999, maxHeight:280 },
-  searchItem:        { padding:14 },
-  searchItemBorder:  { borderBottomWidth:.5, borderBottomColor: COLORS.border },
-  bottomBar:         { position:'absolute', bottom:0, left:0, right:0, backgroundColor:'#fff', padding:16, paddingBottom: Platform.OS === 'ios' ? 34 : 16, borderTopLeftRadius:20, borderTopRightRadius:20, shadowColor:'#000', shadowOffset:{ width:0, height:-2 }, shadowOpacity:.1, shadowRadius:10, elevation:12 },
-  addressRow:        { flexDirection:'row', alignItems:'center', gap:10, marginBottom:14 },
-  addressIcon:       { fontSize:20 },
-  addressText:       { fontSize:13, color: COLORS.text, fontWeight:'500' },
-  confirmBtn:        { backgroundColor: COLORS.purple, borderRadius:14, padding:16, alignItems:'center' },
-  confirmTxt:        { color:'#fff', fontWeight:'700', fontSize:15, letterSpacing:.5 },
+  pinContainer:     { position:'absolute', top:0, left:0, right:0, bottom:0, alignItems:'center', justifyContent:'center', pointerEvents:'none' },
+  pinShadow:        { width:12, height:5, borderRadius:6, backgroundColor:'rgba(0,0,0,0.25)', marginTop:2 },
+  topBar:           { position:'absolute', top:0, left:0, right:0, flexDirection:'row', alignItems:'center', gap:10, padding:12, paddingTop:16, backgroundColor:'rgba(255,255,255,0.97)' },
+  backBtn:          { width:38, height:38, borderRadius:19, backgroundColor:'#f0f0f0', alignItems:'center', justifyContent:'center' },
+  searchBox:        { flex:1, flexDirection:'row', alignItems:'center', gap:8, backgroundColor: COLORS.bg, borderRadius:12, paddingHorizontal:12, paddingVertical:9, borderWidth:.5, borderColor: COLORS.border },
+  searchInput:      { flex:1, fontSize:14, color: COLORS.text, padding:0 },
+  searchDropdown:   { position:'absolute', top:72, left:12, right:12, backgroundColor:'#fff', borderRadius:12, borderWidth:.5, borderColor: COLORS.border, shadowColor:'#000', shadowOffset:{width:0,height:4}, shadowOpacity:.1, shadowRadius:8, elevation:10 },
+  searchItem:       { padding:14 },
+  searchItemBorder: { borderBottomWidth:.5, borderBottomColor: COLORS.border },
+  bottomBar:        { position:'absolute', bottom:0, left:0, right:0, backgroundColor:'#fff', padding:16, borderTopLeftRadius:20, borderTopRightRadius:20, shadowColor:'#000', shadowOffset:{width:0,height:-2}, shadowOpacity:.1, shadowRadius:10, elevation:12 },
+  addressRow:       { flexDirection:'row', alignItems:'center', gap:10, marginBottom:14 },
+  addressIcon:      { fontSize:20 },
+  addressText:      { fontSize:13, color: COLORS.text, fontWeight:'500' },
+  confirmBtn:       { backgroundColor: COLORS.purple, borderRadius:14, padding:16, alignItems:'center' },
+  confirmTxt:       { color:'#fff', fontWeight:'700', fontSize:15, letterSpacing:.5 },
 });

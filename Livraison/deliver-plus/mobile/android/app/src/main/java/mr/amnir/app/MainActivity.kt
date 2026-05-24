@@ -1,4 +1,4 @@
-package mr.deliver.app
+package mr.amnir.app
 
 import android.os.Build
 import android.os.Bundle

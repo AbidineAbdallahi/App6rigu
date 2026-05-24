@@ -7,6 +7,40 @@ const { getRouteInfo } = require('../utils/routeInfo');
 const etaThrottle = new Map();
 const ETA_INTERVAL_MS = 15000;
 
+// ── Centre d'appel support ─────────────────────────────────────────────────
+const agentSockets       = new Set();   // tous les agents connectés
+const availableAgents    = new Set();   // agents prêts à prendre un appel
+const callQueue          = [];          // [{ socketId, callerName, callerType }]
+const activeSupportCalls = new Map();   // callerSocketId → agentSocketId
+
+function broadcastAgentCount(io) {
+  io.emit('support_agents_count', {
+    available: availableAgents.size,
+    total:     agentSockets.size,
+  });
+}
+
+function processQueue(io) {
+  while (callQueue.length > 0 && availableAgents.size > 0) {
+    const agentSocketId = [...availableAgents][0];
+    const caller        = callQueue.shift();
+    availableAgents.delete(agentSocketId);
+    broadcastAgentCount(io);
+    // Mettre à jour les positions des callers restants
+    callQueue.forEach((c, i) => {
+      io.to(c.socketId).emit('support_queue_position', { position: i + 1 });
+    });
+    activeSupportCalls.set(caller.socketId, agentSocketId);
+    io.to(agentSocketId).emit('support_call_incoming', {
+      callerSocketId: caller.socketId,
+      callerName:     caller.callerName,
+      callerType:     caller.callerType,
+    });
+    io.to(caller.socketId).emit('support_call_connecting', { agentSocketId });
+  }
+}
+// ──────────────────────────────────────────────────────────────────────────
+
 module.exports = function socketHandler(io) {
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
@@ -17,6 +51,12 @@ module.exports = function socketHandler(io) {
 
   io.on('connection', socket => {
     console.log(`🔌 Socket connecté: ${socket.id}`);
+
+    // Envoyer immédiatement le compte d'agents au nouveau socket
+    socket.emit('support_agents_count', {
+      available: availableAgents.size,
+      total:     agentSockets.size,
+    });
 
     // Admin rejoint sa room
     socket.on('join_admin', () => {
@@ -29,7 +69,95 @@ module.exports = function socketHandler(io) {
     socket.on('join_agent', () => {
       socket.join('agent');
       socket.join('staff');
-      console.log(`🧑‍💼 Agent connecté`);
+      socket.isAgent = true;
+      agentSockets.add(socket.id);
+      broadcastAgentCount(io);
+      console.log(`🧑‍💼 Agent connecté: ${socket.id}`);
+    });
+
+    // Agent se déclare disponible (prêt à prendre des appels)
+    socket.on('agent_available', ({ agentName } = {}) => {
+      if (!socket.isAgent) {
+        socket.isAgent = true;
+        agentSockets.add(socket.id);
+      }
+      socket.agentName = agentName || 'Agent';
+      availableAgents.add(socket.id);
+      broadcastAgentCount(io);
+      processQueue(io);
+    });
+
+    // Agent se marque indisponible
+    socket.on('agent_unavailable', () => {
+      availableAgents.delete(socket.id);
+      broadcastAgentCount(io);
+    });
+
+    // Client/livreur demande à parler au support
+    socket.on('support_call_request', ({ callerName, callerType } = {}) => {
+      // Dédoublonnage : supprimer de la file si déjà présent
+      const existingIdx = callQueue.findIndex(c => c.socketId === socket.id);
+      if (existingIdx !== -1) callQueue.splice(existingIdx, 1);
+
+      if (availableAgents.size > 0) {
+        const agentSocketId = [...availableAgents][0];
+        availableAgents.delete(agentSocketId);
+        broadcastAgentCount(io);
+        activeSupportCalls.set(socket.id, agentSocketId);
+        io.to(agentSocketId).emit('support_call_incoming', {
+          callerSocketId: socket.id,
+          callerName:     callerName || 'Utilisateur',
+          callerType:     callerType || 'client',
+        });
+        socket.emit('support_call_connecting', { agentSocketId });
+      } else {
+        callQueue.push({
+          socketId:   socket.id,
+          callerName: callerName || 'Utilisateur',
+          callerType: callerType || 'client',
+        });
+        socket.emit('support_call_queued', { position: callQueue.length });
+      }
+    });
+
+    // Caller annule depuis la file d'attente
+    socket.on('support_call_cancel', () => {
+      const idx = callQueue.findIndex(c => c.socketId === socket.id);
+      if (idx !== -1) {
+        callQueue.splice(idx, 1);
+        callQueue.forEach((c, i) => {
+          io.to(c.socketId).emit('support_queue_position', { position: i + 1 });
+        });
+      }
+    });
+
+    // Agent accepte l'appel entrant → le caller peut démarrer WebRTC
+    socket.on('support_call_accepted', ({ callerSocketId } = {}) => {
+      io.to(callerSocketId).emit('support_call_accepted', { agentSocketId: socket.id });
+    });
+
+    // L'un ou l'autre raccroche
+    socket.on('support_call_ended', ({ peerSocketId } = {}) => {
+      if (peerSocketId) io.to(peerSocketId).emit('support_call_ended', {});
+
+      if (socket.isAgent) {
+        // Agent raccroche → retirer de l'appel actif et redevenir disponible
+        activeSupportCalls.forEach((agId, callId) => {
+          if (agId === socket.id) activeSupportCalls.delete(callId);
+        });
+        availableAgents.add(socket.id);
+        broadcastAgentCount(io);
+        processQueue(io);
+      } else {
+        // Caller raccroche → libérer l'agent associé
+        const agentSocketId = activeSupportCalls.get(socket.id);
+        activeSupportCalls.delete(socket.id);
+        if (agentSocketId) {
+          availableAgents.add(agentSocketId);
+          broadcastAgentCount(io);
+          processQueue(io);
+        }
+      }
     });
 
     // Livreur s'identifie
@@ -166,6 +294,38 @@ module.exports = function socketHandler(io) {
 
     socket.on('disconnect', () => {
       console.log(`🔌 Déconnecté: ${socket.id}`);
+
+      if (socket.isAgent) {
+        agentSockets.delete(socket.id);
+        availableAgents.delete(socket.id);
+        broadcastAgentCount(io);
+        // Notifier le caller en cours et libérer
+        activeSupportCalls.forEach((agId, callId) => {
+          if (agId === socket.id) {
+            io.to(callId).emit('support_call_ended', {});
+            activeSupportCalls.delete(callId);
+          }
+        });
+        processQueue(io);
+      } else {
+        // Supprimer de la file si présent
+        const idx = callQueue.findIndex(c => c.socketId === socket.id);
+        if (idx !== -1) {
+          callQueue.splice(idx, 1);
+          callQueue.forEach((c, i) => {
+            io.to(c.socketId).emit('support_queue_position', { position: i + 1 });
+          });
+        }
+        // Libérer l'agent si en appel actif avec ce caller
+        const agentSocketId = activeSupportCalls.get(socket.id);
+        activeSupportCalls.delete(socket.id);
+        if (agentSocketId) {
+          availableAgents.add(agentSocketId);
+          broadcastAgentCount(io);
+          io.to(agentSocketId).emit('support_call_ended', {});
+          processQueue(io);
+        }
+      }
     });
   });
 };

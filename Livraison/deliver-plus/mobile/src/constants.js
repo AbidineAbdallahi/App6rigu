@@ -1,6 +1,7 @@
-export const API_URL    = 'http://192.168.100.86:5000/api';
+﻿export const API_URL    = 'http://192.168.100.86:5000/api';
 export const SOCKET_URL = 'http://192.168.100.86:5000';
-  
+
+
 export const COLORS = {
   purple: '#534AB7', purpleLight: '#EEEDFE', purpleDark: '#3C3489',
   green: '#3B6D11',  greenLight: '#EAF3DE',
@@ -20,7 +21,6 @@ export const SERVICE_COLORS = {
   pharmacie:  { bg:'#FBEAF0', text:'#72243E' },
 };
 
-// Numéro WhatsApp de l'admin pour les demandes de recharge (avec indicatif pays, sans +)
 export const WHATSAPP_RECHARGE = '22233863708';
 
 export const DARK_COLORS = {

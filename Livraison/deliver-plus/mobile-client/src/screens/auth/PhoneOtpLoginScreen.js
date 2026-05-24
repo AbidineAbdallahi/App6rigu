@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  View, Text, Image, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -248,8 +248,7 @@ export default function PhoneOtpLoginScreen() {
 
           {/* Logo */}
           <View style={st.logoWrap}>
-            <View style={st.logo}><Text style={{ fontSize: 32 }}>📦</Text></View>
-            <Text style={st.appName}>Amder</Text>
+            <Image source={require('../../../assets/icon.png')} style={st.logo} />
           </View>
 
           {/* Bouton retour (sauf welcome) */}
@@ -558,7 +557,7 @@ const st = StyleSheet.create({
   langTxt:      { fontSize: 13, color: COLORS.purple, fontWeight: '500' },
   langTxtActive:{ color: '#fff', fontWeight: '700' },
   logoWrap:     { alignItems: 'center', marginBottom: 24 },
-  logo:         { width: 72, height: 72, borderRadius: 20, backgroundColor: COLORS.purpleLight, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  logo:         { width: 100, height: 100, borderRadius: 24, marginBottom: 12 },
   appName:      { fontSize: 26, fontWeight: '900', color: COLORS.text },
   errBox:       { backgroundColor: COLORS.redLight, borderRadius: 8, padding: 10, marginBottom: 14 },
   errTxt:       { color: COLORS.red, fontSize: 13 },

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import useColors from '../../hooks/useColors';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert, Modal, ActivityIndicator, Animated, TextInput, KeyboardAvoidingView, Platform, AppState } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert, Modal, ActivityIndicator, Animated, TextInput, KeyboardAvoidingView, Platform, AppState } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -16,6 +16,7 @@ import { translations } from '../../i18n';
 import { COLORS, SOCKET_URL, SERVICE_ICONS } from '../../constants';
 import DriverChatModal from './DriverChatModal';
 import CallModal from './CallModal';
+import SupportCallModal from './SupportCallModal';
 
 const ORDER_TIMEOUT_MS = 20000;
 const ARRIVAL_RADIUS_M = 100;
@@ -126,6 +127,8 @@ export default function DriverHomeScreen() {
   const [courseTarif, setCourseTarif]       = useState(null);
   const [chatVisible, setChatVisible]       = useState(false);
   const [unreadChat, setUnreadChat]         = useState(0);
+  const [supportCallVisible, setSupportCallVisible] = useState(false);
+  const [agentsOnline, setAgentsOnline]     = useState(0);
   const [incomingCall, setIncomingCall]     = useState(null); // { callerName, callerSocketId, orderId, clientPhone }
   const [callClientVisible, setCallClientVisible] = useState(false);
   const [liveKm, setLiveKm]               = useState(0);
@@ -338,6 +341,11 @@ export default function DriverHomeScreen() {
       }
     );
 
+    // Nombre d'agents support disponibles
+    socket.on('support_agents_count', ({ available }) => {
+      setAgentsOnline(available || 0);
+    });
+
     // Mise à jour du solde après livraison
     socket.on('solde_updated', ({ solde: newSolde, message }) => {
       setSolde(newSolde);
@@ -434,13 +442,17 @@ export default function DriverHomeScreen() {
 
     // ── Appel entrant du client ────────────────────────────────────────────────
     socket.on('call_incoming', ({ orderId: cOrdId, callerName, callerSocketId, clientPhone }) => {
-      if (callerSocketId === socket.id) return; // ignorer notre propre écho
+      if (callerSocketId === socket.id) return;
+      const order = currentOrderRef.current;
+      if (!order || ['livre', 'annule'].includes(order.status)) return;
       setIncomingCall({ callerName, callerSocketId, orderId: cOrdId, clientPhone });
     });
 
-    // ── Chat : recevoir les messages du client même modal fermé ───────────────
+    // ── Chat : recevoir les messages du client uniquement durant le trajet ────
     socket.on('chat_message', (msg) => {
       if (msg.senderRole !== 'client') return;
+      const order = currentOrderRef.current;
+      if (!order || ['livre', 'annule'].includes(order.status)) return;
       setUnreadChat(n => n + 1);
       Alert.alert(
         '💬 ' + (msg.senderName || 'Client'),
@@ -684,7 +696,19 @@ export default function DriverHomeScreen() {
     } catch { Alert.alert(t.error, t.err_status); }
   };
 
-  const isCourse = currentOrder?.orderType === 'course';
+  const isCourse      = currentOrder?.orderType === 'course';
+  // true dès que le chauffeur a une commande active (acceptée → pas encore terminée)
+  const isDuringTrip  = !!currentOrder && !pendingReview && !['livre', 'annule'].includes(currentOrder?.status);
+
+  // Fermer chat/appel automatiquement quand le trajet se termine
+  useEffect(() => {
+    if (!isDuringTrip) {
+      setChatVisible(false);
+      setCallClientVisible(false);
+      setIncomingCall(null);
+      setUnreadChat(0);
+    }
+  }, [isDuringTrip]);
 
   const STATUS_NEXT = isCourse ? {
     accepte:        { next:'en_route',       label: t.btn_en_route_ride, color: COLORS.blue },
@@ -734,9 +758,10 @@ export default function DriverHomeScreen() {
           <View style={styles.heroBubble1} />
           <View style={styles.heroBubble2} />
 
-          {/* Ligne haut : salutation + badge statut */}
+          {/* Ligne haut : logo + salutation + badge statut */}
           <View style={styles.heroTop}>
-            <View style={{ flex: 1 }}>
+            <Image source={require('../../../assets/icon.png')} style={styles.heroLogo} />
+            <View style={{ flex: 1, marginLeft: 10 }}>
               <Text style={styles.heroGreeting}>
                 {t.home_hello} {user?.firstName} {driver?.driverType === 'course' ? '🚖' : '🛵'}
               </Text>
@@ -748,20 +773,22 @@ export default function DriverHomeScreen() {
             </View>
           </View>
 
-          {/* Solde */}
-          <Text style={styles.heroSoldeLabel}>{t.home_solde}</Text>
-          <Text style={styles.heroSoldeValue}>{solde.toLocaleString()} MRU</Text>
-
-          {/* Toggle */}
-          <View style={styles.heroToggleRow}>
-            <Text style={styles.heroToggleLabel}>{isOnline ? t.home_receive : t.home_activate}</Text>
-            <Switch
-              value={isOnline}
-              onValueChange={toggleOnline}
-              trackColor={{ false: 'rgba(255,255,255,0.22)', true: '#4ADE80' }}
-              thumbColor="#fff"
-              ios_backgroundColor="rgba(255,255,255,0.22)"
-            />
+          {/* Solde + Toggle sur la même ligne */}
+          <View style={styles.heroBottomRow}>
+            <View>
+              <Text style={styles.heroSoldeLabel}>{t.home_solde}</Text>
+              <Text style={styles.heroSoldeValue}>{solde.toLocaleString()} MRU</Text>
+            </View>
+            <View style={styles.heroToggleRow}>
+              <Text style={styles.heroToggleLabel}>{isOnline ? t.home_receive : t.home_activate}</Text>
+              <Switch
+                value={isOnline}
+                onValueChange={toggleOnline}
+                trackColor={{ false: 'rgba(255,255,255,0.22)', true: '#4ADE80' }}
+                thumbColor="#fff"
+                ios_backgroundColor="rgba(255,255,255,0.22)"
+              />
+            </View>
           </View>
         </View>
 
@@ -784,7 +811,36 @@ export default function DriverHomeScreen() {
           </View>
         </View>
       </View>
-      <View style={[styles.contentArea, { flex: 1, paddingBottom: orderAlert ? 220 : 24 }]}>
+      {/* ── CONTACTER LE SUPPORT ───────────────────────────── */}
+      <View style={{ paddingHorizontal: 16, marginBottom: 4 }}>
+        <TouchableOpacity
+          style={styles.supportCard}
+          onPress={() => setSupportCallVisible(true)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.supportIconWrap}>
+            <Text style={{ fontSize: 22 }}>🎧</Text>
+          </View>
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={styles.supportTitle}>Contacter le support</Text>
+            <Text style={styles.supportSub}>Parler à un agent en direct</Text>
+          </View>
+          <View style={[styles.liveBadge, {
+            backgroundColor: agentsOnline > 0 ? 'rgba(39,174,96,0.12)' : 'rgba(230,126,34,0.12)',
+          }]}>
+            <View style={[styles.liveDot, {
+              backgroundColor: agentsOnline > 0 ? '#27AE60' : '#E67E22',
+            }]} />
+            <Text style={[styles.liveText, {
+              color: agentsOnline > 0 ? '#27AE60' : '#E67E22',
+            }]}>
+              {agentsOnline > 0 ? 'Live' : 'Occupé'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={[styles.contentArea, { flex: 1 }]} contentContainerStyle={{ paddingBottom: orderAlert ? 220 : 24 }} showsVerticalScrollIndicator={false}>
 
         {/* ── ANNULATION EN ATTENTE ──────────────────────────── */}
         {pendingReview && (
@@ -911,24 +967,26 @@ export default function DriverHomeScreen() {
                 </TouchableOpacity>
               )}
 
-              {/* Chat + Appel */}
-              <View style={styles.secondaryRow}>
-                <TouchableOpacity
-                  style={[styles.secondaryBtn, { flex: 2 }]}
-                  onPress={() => { setUnreadChat(0); setChatVisible(true); }}
-                >
-                  <Text style={styles.secondaryBtnText}>
-                    💬 {t.chat_open || 'Chat'}
-                    {unreadChat > 0 && <Text style={{ color: COLORS.red }}> ({unreadChat})</Text>}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.secondaryBtn, { flex: 1, backgroundColor: COLORS.greenLight, borderColor: COLORS.green }]}
-                  onPress={() => setCallClientVisible(true)}
-                >
-                  <Text style={[styles.secondaryBtnText, { color: COLORS.green }]}>📞</Text>
-                </TouchableOpacity>
-              </View>
+              {/* Chat + Appel — uniquement durant le trajet */}
+              {isDuringTrip && (
+                <View style={styles.secondaryRow}>
+                  <TouchableOpacity
+                    style={[styles.secondaryBtn, { flex: 2 }]}
+                    onPress={() => { setUnreadChat(0); setChatVisible(true); }}
+                  >
+                    <Text style={styles.secondaryBtnText}>
+                      💬 {t.chat_open || 'Chat'}
+                      {unreadChat > 0 && <Text style={{ color: COLORS.red }}> ({unreadChat})</Text>}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.secondaryBtn, { flex: 1, backgroundColor: COLORS.greenLight, borderColor: COLORS.green }]}
+                    onPress={() => setCallClientVisible(true)}
+                  >
+                    <Text style={[styles.secondaryBtnText, { color: COLORS.green }]}>📞</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Annulation */}
               {(isCourse ? ['accepte','en_route'].includes(currentOrder.status) : currentOrder.status === 'accepte') && (
@@ -1020,7 +1078,7 @@ export default function DriverHomeScreen() {
             )}
           </>
         ) : null}
-      </View>
+      </ScrollView>
 
       {/* ── OVERLAY NOUVELLE COMMANDE ──────────────────────── */}
       {!!orderAlert && (
@@ -1149,13 +1207,13 @@ export default function DriverHomeScreen() {
       </Modal>
 
       <DriverChatModal
-        visible={chatVisible}
+        visible={chatVisible && isDuringTrip}
         orderId={currentOrder?._id}
         onClose={() => { setChatVisible(false); setUnreadChat(0); }}
       />
 
       <CallModal
-        visible={!!incomingCall}
+        visible={!!incomingCall && isDuringTrip}
         mode="callee"
         peerName={
           incomingCall?.callerName &&
@@ -1172,7 +1230,7 @@ export default function DriverHomeScreen() {
       />
 
       <CallModal
-        visible={callClientVisible}
+        visible={callClientVisible && isDuringTrip}
         mode="caller"
         myName={[user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Livreur'}
         peerName={
@@ -1184,36 +1242,46 @@ export default function DriverHomeScreen() {
         socketRef={socketRef}
         onEnd={() => setCallClientVisible(false)}
       />
+
+      <SupportCallModal
+        visible={supportCallVisible}
+        callerName={[user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Livreur'}
+        callerType="driver"
+        socketRef={socketRef}
+        onClose={() => setSupportCallVisible(false)}
+      />
     </SafeAreaView>
   );
 }
 
 const makeStyles = (C) => StyleSheet.create({
   safe:        { flex: 1, backgroundColor: '#F3F2FA' },
-  topSection:  { paddingHorizontal: 16, paddingTop: 10 },
+  topSection:  { paddingHorizontal: 16, paddingTop: 6 },
   contentArea: { paddingHorizontal: 16, paddingTop: 8 },
 
   /* Hero card */
-  heroCard:      { backgroundColor: COLORS.purple, borderRadius: 20, padding: 14, marginBottom: 10, overflow: 'hidden' },
+  heroCard:      { backgroundColor: COLORS.purple, borderRadius: 20, padding: 10, marginBottom: 8, overflow: 'hidden' },
+  heroLogo:      { width: 38, height: 38, borderRadius: 10 },
   heroBubble1:   { position: 'absolute', width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.07)', top: -40, right: -30 },
   heroBubble2:   { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.05)', bottom: -24, left: 20 },
-  heroTop:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
-  heroGreeting:  { fontSize: 15, fontWeight: '700', color: '#fff', marginBottom: 2 },
-  heroZone:      { fontSize: 11, color: 'rgba(255,255,255,0.6)', textTransform: 'capitalize' },
+  heroTop:       { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  heroGreeting:  { fontSize: 14, fontWeight: '700', color: '#fff', marginBottom: 1 },
+  heroZone:      { fontSize: 10, color: 'rgba(255,255,255,0.6)', textTransform: 'capitalize' },
+  heroBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   statusChip:    { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
   statusDot:     { width: 7, height: 7, borderRadius: 4 },
   statusChipText:{ fontSize: 11, fontWeight: '700', color: '#fff' },
-  heroSoldeLabel:{ fontSize: 10, color: 'rgba(255,255,255,0.65)', marginBottom: 2 },
-  heroSoldeValue:{ fontSize: 26, fontWeight: '800', color: '#fff', letterSpacing: 0.3, marginBottom: 10 },
-  heroToggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
-  heroToggleLabel: { fontSize: 12, color: 'rgba(255,255,255,0.88)', fontWeight: '500' },
+  heroSoldeLabel:{ fontSize: 10, color: 'rgba(255,255,255,0.65)', marginBottom: 1 },
+  heroSoldeValue:{ fontSize: 20, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
+  heroToggleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 },
+  heroToggleLabel: { fontSize: 11, color: 'rgba(255,255,255,0.88)', fontWeight: '500' },
 
   /* Stats */
-  statsRow:  { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  statCard:  { flex: 1, backgroundColor: C.card, borderRadius: 14, padding: 10, alignItems: 'center', shadowColor: COLORS.purple, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 2 },
-  statIcon:  { fontSize: 14, marginBottom: 4 },
-  statValue: { fontSize: 17, fontWeight: '800', color: C.text },
-  statLabel: { fontSize: 10, color: C.muted, marginTop: 1, textAlign: 'center' },
+  statsRow:  { flexDirection: 'row', gap: 6, marginBottom: 6 },
+  statCard:  { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 7, alignItems: 'center', shadowColor: COLORS.purple, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 2 },
+  statIcon:  { fontSize: 12, marginBottom: 2 },
+  statValue: { fontSize: 14, fontWeight: '800', color: C.text },
+  statLabel: { fontSize: 9, color: C.muted, marginTop: 1, textAlign: 'center' },
 
   /* Pending */
   pendingCard:       { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: COLORS.amberLight, borderRadius: 18, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: COLORS.amber + '50' },
@@ -1250,6 +1318,40 @@ const makeStyles = (C) => StyleSheet.create({
   secondaryBtnText: { color: COLORS.purple, fontWeight: '700', fontSize: 13 },
   cancelOrderBtn:    { marginTop: 2, borderRadius: 12, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.red, backgroundColor: COLORS.redLight },
   cancelOrderBtnTxt: { color: COLORS.red, fontWeight: '700', fontSize: 13 },
+
+  /* Support card */
+  supportCard: {
+    backgroundColor: C.card,
+    borderRadius: 14,
+    padding: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: COLORS.purple,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  supportIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: COLORS.purpleLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  supportTitle: { fontSize: 12, fontWeight: '700', color: C.text, marginBottom: 1 },
+  supportSub:   { fontSize: 10, color: C.muted },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 5,
+  },
+  liveDot:  { width: 7, height: 7, borderRadius: 4 },
+  liveText: { fontSize: 12, fontWeight: '700' },
 
   /* Section header */
   sectionHeader:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },

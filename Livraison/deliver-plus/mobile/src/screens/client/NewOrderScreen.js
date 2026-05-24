@@ -28,7 +28,7 @@ function haversine(lat1, lng1, lat2, lng2) {
 
 async function nominatimSearch(query) {
   const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=mr&accept-language=fr`;
-  const res  = await fetch(url, { headers: { 'User-Agent': 'AmderApp/1.0' } });
+  const res  = await fetch(url, { headers: { 'User-Agent': 'AmnirApp/1.0' } });
   const data = await res.json();
   return data.map(d => ({
     label: d.display_name.split(',').slice(0, 3).join(', '),
@@ -41,7 +41,7 @@ async function reverseGeocode(lat, lng) {
   try {
     const res  = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=fr`,
-      { headers: { 'User-Agent': 'AmderApp/1.0' } }
+      { headers: { 'User-Agent': 'AmnirApp/1.0' } }
     );
     const data = await res.json();
     const a    = data.address || {};

@@ -1,4 +1,4 @@
-rootProject.name = 'Deliver+'
+rootProject.name = 'Amnir'
 
 import groovy.json.JsonOutput
 
@@ -15,10 +15,10 @@ if (!autolinkingFile.exists() || autolinkingFile.length() == 0) {
         reactNativeVersion: "0.81",
         project: [
             android: [
-                packageName: "mr.deliver.app",
+                packageName: "mr.amnir.app",
                 sourceDir: androidDir,
                 appName: "main",
-                packageFolder: "mr/deliver/app",
+                packageFolder: "mr/amnir/app",
                 mainActivity: ".MainActivity",
                 assets: [],
                 buildGradlePath: "${androidDir}\\\\app\\\\build.gradle",

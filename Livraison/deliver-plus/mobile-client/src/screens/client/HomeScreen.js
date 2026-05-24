@@ -1,23 +1,29 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { io } from 'socket.io-client';
 import useAuthStore from '../../stores/authStore';
 import useLangStore from '../../stores/langStore';
 import { translations } from '../../i18n';
 import api from '../../services/api';
-import { COLORS, SERVICE_ICONS, SERVICE_COLORS } from '../../constants';
+import { COLORS, SERVICE_ICONS, SERVICE_COLORS, SOCKET_URL } from '../../constants';
+import SupportCallModal from './SupportCallModal';
 
 const ACTIVE_STATUSES = ['en_attente', 'diffuse', 'accepte', 'en_preparation', 'en_route'];
 
 export default function HomeScreen({ navigation }) {
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
   const { lang } = useLangStore();
   const t = translations[lang];
   const isAr = lang === 'ar';
   const rtl = isAr ? { textAlign: 'right', writingDirection: 'rtl' } : {};
 
-  const [activeOrder, setActiveOrder] = useState(null);
+  const [activeOrder, setActiveOrder]             = useState(null);
+  const [supportCallVisible, setSupportCallVisible] = useState(false);
+  const [agentsOnline, setAgentsOnline]           = useState(0);
+
+  const socketRef = useRef(null);
 
   useFocusEffect(useCallback(() => {
     api.get('/orders?limit=10').then(r => {
@@ -25,6 +31,21 @@ export default function HomeScreen({ navigation }) {
       setActiveOrder(orders.find(o => ACTIVE_STATUSES.includes(o.status)) || null);
     }).catch(() => {});
   }, []));
+
+  // Socket pour le compteur d'agents support
+  useEffect(() => {
+    const tok = token || useAuthStore.getState().token;
+    const socket = io(SOCKET_URL, {
+      auth: { token: tok },
+      transports: ['websocket'],
+      reconnection: true,
+    });
+    socketRef.current = socket;
+    socket.on('support_agents_count', ({ available }) => {
+      setAgentsOnline(available || 0);
+    });
+    return () => socket.disconnect();
+  }, []);
 
   const DELIVERY_SERVICES = [
     { key: 'nourriture', label: t.svc_nourriture, desc: t.svc_nourriture_desc },
@@ -99,7 +120,42 @@ export default function HomeScreen({ navigation }) {
           })}
         </View>
 
+        {/* Contacter le support */}
+        <TouchableOpacity
+          style={styles.supportCard}
+          onPress={() => setSupportCallVisible(true)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.supportIconWrap}>
+            <Text style={{ fontSize: 22 }}>🎧</Text>
+          </View>
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={styles.supportTitle}>Contacter le support</Text>
+            <Text style={styles.supportSub}>Parler à un agent en direct</Text>
+          </View>
+          <View style={[styles.liveBadge, {
+            backgroundColor: agentsOnline > 0 ? 'rgba(39,174,96,0.10)' : 'rgba(230,126,34,0.10)',
+          }]}>
+            <View style={[styles.liveDot, {
+              backgroundColor: agentsOnline > 0 ? '#27AE60' : '#E67E22',
+            }]} />
+            <Text style={[styles.liveText, {
+              color: agentsOnline > 0 ? '#27AE60' : '#E67E22',
+            }]}>
+              {agentsOnline > 0 ? 'Live' : 'Occupé'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
       </ScrollView>
+
+      <SupportCallModal
+        visible={supportCallVisible}
+        callerName={[user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Client'}
+        callerType="client"
+        socketRef={socketRef}
+        onClose={() => setSupportCallVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -125,4 +181,35 @@ const styles = StyleSheet.create({
   serviceIcon:       { fontSize: 28, marginBottom: 8 },
   serviceLabel:      { fontSize: 14, fontWeight: '600' },
   serviceDesc2:      { fontSize: 12, marginTop: 2 },
+
+  supportCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: .5,
+    borderColor: COLORS.border,
+    marginBottom: 16,
+  },
+  supportIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: COLORS.purpleLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  supportTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
+  supportSub:   { fontSize: 12, color: COLORS.muted },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 5,
+  },
+  liveDot:  { width: 7, height: 7, borderRadius: 4 },
+  liveText: { fontSize: 12, fontWeight: '700' },
 });

@@ -29,8 +29,9 @@ function Guard({ adminOnly = false, children }) {
 }
 
 function HomeRedirect() {
-  const { user } = useAuthStore();
-  if (!user) return null;
+  const { user, token } = useAuthStore();
+  if (!user && token) return <div className="loading-center"><div className="spinner"/></div>;
+  if (!user) return <Navigate to="/login" replace />;
   return user.role === 'agent' ? <AgentDashboardPage /> : <DashboardPage />;
 }
 
